@@ -62,7 +62,7 @@ static double varerr(const prcopt_t *opt, const ssat_t *ssat, const obsd_t *obs,
     }
     if (el<MIN_EL) el=MIN_EL;
     /* var = R^2*(a^2 + (b^2/sin(el) + c^2*(10^(0.1*(snr_max-snr_rover)))) + (d*rcv_std)^2) */
-    varr=SQR(opt->err[1])+SQR(opt->err[2])/sin(el);
+    varr=SQR(opt->err[1])+SQR(opt->err[2])/(el);
     if (opt->err[6]>0.0) {  /* if snr term not zero */
         snr_rover=(ssat)?SNR_UNIT*ssat->snr_rover[0]:opt->err[5];
         varr+=SQR(opt->err[6])*pow(10,0.1*MAX(opt->err[5]-snr_rover,0));
@@ -130,9 +130,9 @@ static double prange(const obsd_t *obs, const nav_t *nav, const prcopt_t *opt,
 
     if (opt->ionoopt==IONOOPT_IFLC && P1!=0.0 && P2!=0.0) { /* dual-frequency */
 		PC = P2;
-        if(P2-P1>30 || P2-P1<1)
+        if(P2-P1>20 || P2-P1<1.5)
 		{
-			if (obs->SNR[2]>35) return P2;
+			if (obs->SNR[2]>30) return P2;
 			else if (obs->SNR[0]>35) return P1;
 			else return 0;
 		}
@@ -164,8 +164,8 @@ static double prange(const obsd_t *obs, const nav_t *nav, const prcopt_t *opt,
     else { /* single-freq (L1/E1/B1) */
         *var=SQR(ERR_CBIAS);
         
-		if (obs->SNR[2]>30) PC = P2;
-		else if (obs->SNR[0]>35) PC = P1;
+		if (obs->SNR[2]>25) PC = P2;
+		else if (obs->SNR[0]>30) PC = P1;
 		else return 0;
 
    //     if (sys==SYS_GPS||sys==SYS_QZS) { /* L1 */
