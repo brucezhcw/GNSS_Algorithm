@@ -135,7 +135,7 @@ extern "C" {
 #define NEXOBS      0                   /* number of extended obs codes */
 #endif
 
-#define SNR_UNIT    0.001               /* SNR unit (dBHz) */
+#define SNR_UNIT    1               /* SNR unit (dBHz) */
 
 #define MINPRNGPS   1                   /* min satellite PRN number of GPS */
 #define MAXPRNGPS   32                  /* max satellite PRN number of GPS */

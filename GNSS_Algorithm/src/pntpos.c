@@ -71,7 +71,7 @@ static double varerr(const prcopt_t *opt, const ssat_t *ssat, const obsd_t *obs,
     if (opt->err[7]>0.0) {
         varr+=SQR(opt->err[7]*0.01*(1<<(obs->Pstd[0]+5)));  /* 0.01*2^(n+5) m */
     }
-    if (opt->ionoopt==IONOOPT_IFLC) varr*=SQR(3.0); /* iono-free */
+	if (opt->ionoopt == IONOOPT_IFLC) varr *= 1;// SQR(3.0); /* iono-free */
     return SQR(fact)*varr;
 }
 /* get group delay parameter (m) ---------------------------------------------*/
@@ -101,7 +101,7 @@ static int snrmask(const obsd_t *obs, const double *azel, const prcopt_t *opt)
         return 0;
     }
     if (opt->ionoopt==IONOOPT_IFLC) {
-        f2=seliflc(opt->nf,satsys(obs->sat,NULL));
+        f2=2;
         if (testsnr(0,f2,azel[1],obs->SNR[f2]*SNR_UNIT,&opt->snrmask)) return 0;
     }
     return 1;
@@ -110,83 +110,91 @@ static int snrmask(const obsd_t *obs, const double *azel, const prcopt_t *opt)
 static double prange(const obsd_t *obs, const nav_t *nav, const prcopt_t *opt,
                      double *var)
 {
-    double P1,P2,gamma,b1,b2;
+    double PC,P1,P2,gamma,b1,b2;
     int sat,sys,f2;
     
     sat=obs->sat;
     sys=satsys(sat,NULL);
     P1=obs->P[0];
-    f2=seliflc(opt->nf,satsys(obs->sat,NULL));
+    f2=2;
     P2=obs->P[f2];
     *var=0.0;
     
-    if (P1==0.0||(opt->ionoopt==IONOOPT_IFLC&&P2==0.0)) return 0.0;
+    if (P1==0.0 && P2==0.0) return 0.0;
     
     /* P1-C1,P2-C2 DCB correction */
     if (sys==SYS_GPS||sys==SYS_GLO) {
-        if (obs->code[0]==CODE_L1C) P1+=nav->cbias[sat-1][1]; /* C1->P1 */
-        if (obs->code[1]==CODE_L2C) P2+=nav->cbias[sat-1][2]; /* C2->P2 */
+        //if (obs->code[0]==CODE_L1C) P1+=nav->cbias[sat-1][1]; /* C1->P1 */
+        //if (obs->code[1]==CODE_L2C) P2+=nav->cbias[sat-1][2]; /* C2->P2 */
     }
-    if (opt->ionoopt==IONOOPT_IFLC) { /* dual-frequency */
-        
+
+    if (opt->ionoopt==IONOOPT_IFLC && P1!=0.0 && P2!=0.0) { /* dual-frequency */
+		PC = P2;
+        if(P2-P1>30 || P2-P1<1)
+		{
+			if (obs->SNR[2]>35) return P2;
+			else if (obs->SNR[0]>35) return P1;
+			else return 0;
+		}
+
         if (sys==SYS_GPS||sys==SYS_QZS) { /* L1-L2 or L1-L5 */
-            gamma=f2==1?SQR(FREQL1/FREQL2):SQR(FREQL1/FREQL5);
-            return (P2-gamma*P1)/(1.0-gamma);
+			gamma = f2 == 1 ? SQR(FREQL1)/(SQR(FREQL1)-SQR(FREQL2)) : SQR(FREQL1)/(SQR(FREQL1)-SQR(FREQL5));
+            return P2-gamma/(P2-P1);
         }
         else if (sys==SYS_GLO) { /* G1-G2 or G1-G3 */
-            gamma=f2==1?SQR(FREQ1_GLO/FREQ2_GLO):SQR(FREQ1_GLO/FREQ2_GLO);
-            return (P2-gamma*P1)/(1.0-gamma);
+			gamma = f2 == 1 ? SQR(FREQ1_GLO)/(SQR(FREQ1_GLO)-SQR(FREQ2_GLO)) : SQR(FREQ1_GLO)/(SQR(FREQ1_GLO)-SQR(FREQ3_GLO));
+            return P2-gamma/(P2-P1);
         }
         else if (sys==SYS_GAL) { /* E1-E5b, E1-E5a */
-            gamma=f2==1?SQR(FREQL1/FREQE5b):SQR(FREQL1/FREQL5);
+			gamma = f2 == 1 ? SQR(FREQL1)/(SQR(FREQL1)-SQR(FREQE5b)) : SQR(FREQL1)/(SQR(FREQL1)-SQR(FREQL5));
             if (f2==1&&getseleph(SYS_GAL)) { /* F/NAV */
                 P2-=gettgd(sat,nav,0)-gettgd(sat,nav,1); /* BGD_E5aE5b */
             }
-            return (P2-gamma*P1)/(1.0-gamma);
+            return P2-gamma/(P2-P1);
         }
-        else if (sys==SYS_CMP) { /* B1-B2 */
-            gamma=SQR(((obs->code[0]==CODE_L2I)?FREQ1_CMP:FREQL1)/FREQ2_CMP);
-            if      (obs->code[0]==CODE_L2I) b1=gettgd(sat,nav,0); /* TGD_B1I */
-            else if (obs->code[0]==CODE_L1P) b1=gettgd(sat,nav,2); /* TGD_B1Cp */
-            else b1=gettgd(sat,nav,2)+gettgd(sat,nav,4); /* TGD_B1Cp+ISC_B1Cd */
-            b2=gettgd(sat,nav,1); /* TGD_B2I/B2bI (m) */
-            return ((P2-gamma*P1)-(b2-gamma*b1))/(1.0-gamma);
+        else if (sys==SYS_CMP) { /* B1-B2 or  B1-B2a */
+			gamma = f2 == 1 ? SQR(FREQ1_CMP)/(SQR(FREQ1_CMP)-SQR(FREQ2_CMP)) : SQR(FREQ1_CMP)/(SQR(FREQ1_CMP)-SQR(FREQL5));
+            return P2-gamma/(P2-P1);
         }
         else if (sys==SYS_IRN) { /* L5-S */
-            gamma=SQR(FREQL5/FREQs);
-            return (P2-gamma*P1)/(1.0-gamma);
+			gamma = SQR(FREQs) / (SQR(FREQs) - SQR(FREQL5));
+            return P2-gamma/(P2-P1);
         }
     }
     else { /* single-freq (L1/E1/B1) */
         *var=SQR(ERR_CBIAS);
         
-        if (sys==SYS_GPS||sys==SYS_QZS) { /* L1 */
-            b1=gettgd(sat,nav,0); /* TGD (m) */
-            return P1-b1;
-        }
-        else if (sys==SYS_GLO) { /* G1 */
-            gamma=SQR(FREQ1_GLO/FREQ2_GLO);
-            b1=gettgd(sat,nav,0); /* -dtaun (m) */
-            return P1-b1/(gamma-1.0);
-        }
-        else if (sys==SYS_GAL) { /* E1 */
-            if (getseleph(SYS_GAL)) b1=gettgd(sat,nav,0); /* BGD_E1E5a */
-            else                    b1=gettgd(sat,nav,1); /* BGD_E1E5b */
-            return P1-b1;
-        }
-        else if (sys==SYS_CMP) { /* B1I/B1Cp/B1Cd */
-            if      (obs->code[0]==CODE_L2I) b1=gettgd(sat,nav,0); /* TGD_B1I */
-            else if (obs->code[0]==CODE_L1P) b1=gettgd(sat,nav,2); /* TGD_B1Cp */
-            else b1=gettgd(sat,nav,2)+gettgd(sat,nav,4); /* TGD_B1Cp+ISC_B1Cd */
-            return P1-b1;
-        }
-        else if (sys==SYS_IRN) { /* L5 */
-            gamma=SQR(FREQs/FREQL5);
-            b1=gettgd(sat,nav,0); /* TGD (m) */
-            return P1-gamma*b1;
-        }
+		if (obs->SNR[2]>30) PC = P2;
+		else if (obs->SNR[0]>35) PC = P1;
+		else return 0;
+
+   //     if (sys==SYS_GPS||sys==SYS_QZS) { /* L1 */
+   //         b1=gettgd(sat,nav,0); /* TGD (m) */
+			//return PC-b1;
+   //     }
+   //     else if (sys==SYS_GLO) { /* G1 */
+   //         gamma=SQR(FREQ1_GLO/FREQ2_GLO);
+   //         b1=gettgd(sat,nav,0); /* -dtaun (m) */
+   //         return PC-b1/(gamma-1.0);
+   //     }
+   //     else if (sys==SYS_GAL) { /* E1 */
+   //         if (getseleph(SYS_GAL)) b1=gettgd(sat,nav,0); /* BGD_E1E5a */
+   //         else                    b1=gettgd(sat,nav,1); /* BGD_E1E5b */
+   //         return PC-b1;
+   //     }
+   //     else if (sys==SYS_CMP) { /* B1I/B1Cp/B1Cd */
+   //         if      (obs->code[0]==CODE_L2I) b1=gettgd(sat,nav,0); /* TGD_B1I */
+   //         else if (obs->code[0]==CODE_L1P) b1=gettgd(sat,nav,2); /* TGD_B1Cp */
+   //         else b1=gettgd(sat,nav,2)+gettgd(sat,nav,4); /* TGD_B1Cp+ISC_B1Cd */
+   //         return PC-b1;
+   //     }
+   //     else if (sys==SYS_IRN) { /* L5 */
+   //         gamma=SQR(FREQs/FREQL5);
+   //         b1=gettgd(sat,nav,0); /* TGD (m) */
+   //         return PC-gamma*b1;
+   //     }
     }
-    return P1;
+	return PC;
 }
 /* ionospheric correction ------------------------------------------------------
 * compute ionospheric correction
