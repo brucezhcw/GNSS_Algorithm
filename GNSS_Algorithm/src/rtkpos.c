@@ -2164,6 +2164,9 @@ extern void rtkinit(rtk_t *rtk, const prcopt_t *opt)
     rtk->opt=*opt;
     rtk->initial_mode=rtk->opt.mode;
     rtk->sol.thres=(float)opt->thresar[0];
+
+	rtk->x_spp = NULL;
+	rtk->P_spp = NULL;
 }
 /* free rtk control ------------------------------------------------------------
 * free memory for rtk control struct
@@ -2261,7 +2264,8 @@ extern int rtkpos(rtk_t *rtk, const obsd_t *obs, int n, const nav_t *nav)
     time=rtk->sol.time; /* previous epoch */
     
     /* rover position and time by single point positioning */
-    if (!pntpos(obs,nu,nav,&rtk->opt,&rtk->sol,NULL,rtk->ssat,msg)) {
+	if ((opt->dynamics > 0 && !pntpos_ekf(obs, nu, nav, rtk))
+		|| (opt->dynamics == 0 && !pntpos(obs, nu, nav, &rtk->opt, &rtk->sol, NULL, rtk->ssat, msg))){
         errmsg(rtk,"point pos error (%s)\n",msg);
 
         if (!rtk->opt.dynamics) {

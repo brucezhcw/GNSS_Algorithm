@@ -36,6 +36,7 @@ int main(int argc, char **argv)
 		prcopt.snrmask.mask[i][j] = 20;
 
 	prcopt.mode = PMODE_SINGLE;
+	prcopt.spp_mode = SPP_MODE_LX;
 
 	for (j = 0; j<2; j++) pos[j] *= D2R;
 	pos2ecef(pos, prcopt.rb);

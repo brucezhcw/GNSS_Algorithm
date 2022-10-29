@@ -533,6 +533,11 @@ extern "C" {
 #define FILEPATHSEP '/'
 #endif
 
+/*-----------------------new add for define-----------------------------------*/
+#define SPP_MODE_L1  1    /*for single frequency*/
+#define SPP_MODE_LX  2   /*for mul-frequency*/
+#define SPP_MODE_LIF  3  /*for iono-free*/
+
 /* type definitions ----------------------------------------------------------*/
 
 typedef struct {        /* time struct */
@@ -1039,6 +1044,8 @@ typedef struct {        /* processing options type */
     double odisp[2][6*11]; /* ocean tide loading parameters {rov,base} */
     int  freqopt;       /* disable L2-AR */
     char pppopt[256];   /* ppp option */
+
+	int spp_mode;       /*SPP mode(SPP_MODE_??)*/
 } prcopt_t;
 
 typedef struct {        /* solution options type */
@@ -1169,6 +1176,7 @@ typedef struct {        /* RTK control/result type */
     char errbuf[MAXERRMSG]; /* error message buffer */
     prcopt_t opt;       /* processing options */
     int initial_mode;   /* initial positioning mode */
+	double *x_spp, *P_spp;      /* SPP states and their covariance */
 } rtk_t;
 
 typedef struct {        /* receiver raw data control type */
@@ -1818,6 +1826,8 @@ EXPORT void gis_free(gis_t *gis);
 extern int showmsg(const char *format,...);
 extern void settspan(gtime_t ts, gtime_t te);
 extern void settime(gtime_t time);
+
+extern int pntpos_ekf(const obsd_t *obs, const int n, const nav_t *nav, rtk_t *rtk);
 
 #ifdef __cplusplus
 }
