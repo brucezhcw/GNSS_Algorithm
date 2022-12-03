@@ -52,9 +52,12 @@
 #define NX_F		(9 + 1 + 4)	/* 位置*3 速度*3 加速度*3 接收机钟差*1 GNSS系统间群延迟*4 */
 
 /* pseudorange measurement error variance ------------------------------------*/
-static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys)
+static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys, int freq)
 {
     double fact=1.0,varr,snr_rover;
+
+	if (freq == 1) fact *= 0.9;
+	else if (freq == 2) fact *= 0.85;
 
     switch (sys) {
         case SYS_GPS: fact *= EFACT_GPS; break;
@@ -80,9 +83,12 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys)
     return SQR(fact)*varr;
 }
 /* doppler measurement error variance ------------------------------------*/
-static double varerr_dop(const prcopt_t *opt, const obsd_t *obs, double el, int sys)
+static double varerr_dop(const prcopt_t *opt, const obsd_t *obs, double el, int sys, int freq)
 {
     double fact=0.002,varr,snr_rover;
+
+	if (freq == 1) fact *= 1.0;
+	else if (freq == 2) fact *= 0.95;
 
 	switch (sys) {
         case SYS_GPS: fact *= EFACT_GPS; break;
@@ -545,7 +551,7 @@ static int rescode(int iter, const obsd_t *obs, int n, const double *rs,
         vsat[i]=1; resp[i]=v[nv]; (*ns)++;
         
         /* variance of pseudorange error */
-        var[nv++]=varerr(opt,&obs[i],azel[1+i*2],sys)+vare[i]+vmeas+vion+vtrp;
+        var[nv++]=varerr(opt,&obs[i],azel[1+i*2],sys,0)+vare[i]+vmeas+vion+vtrp;
         trace(4,"sat=%2d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n",obs[i].sat,
               azel[i*2]*R2D,azel[1+i*2]*R2D,resp[i],sqrt(var[nv-1]));
     }
@@ -687,7 +693,7 @@ static int rescode_mulfreq(int iter, const obsd_t *obs, int n, const double *rs,
 			resp[i] = v[nv];
 
 			/* variance of pseudorange error */
-			var[nv++] = varerr(opt, &obs[i], azel[1 + i * 2], sys) + vare[i] + vmeas + vion + vtrp;
+			var[nv++] = varerr(opt, &obs[i], azel[1 + i * 2], sys, freq_idx) + vare[i] + vmeas + vion + vtrp;
 
 			trace(4, "sat=%3d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n", obs[i].sat,
 				azel[i * 2] * R2D, azel[1 + i * 2] * R2D, resp[i], sqrt(var[nv - 1]));
@@ -835,7 +841,7 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 			resp[i] = v[nv];
 
 			/* variance of pseudorange error */
-			var[nv++] = varerr(opt, &obs[i], azel[1 + i * 2], sys);
+			var[nv++] = varerr(opt, &obs[i], azel[1 + i * 2], sys, freq_idx);
 			// var[nv++] = SQR(1);
 
 			trace(3, "sat=%3d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n", obs[i].sat,
@@ -904,7 +910,7 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
             v[nv] = (-obs[i].D[freq_idx] * CLIGHT / freq - (rate - CLIGHT * dts[1 + i * 2])) - v_ref;
 
             /* variance of pseudorange error */
-			var[nv] = varerr_dop(opt, &obs[i], azel[1 + i * 2], sys);
+			var[nv] = varerr_dop(opt, &obs[i], azel[1 + i * 2], sys, freq_idx);
 
             /* design matrix */
             for (j = 0; j < 3; j++)
