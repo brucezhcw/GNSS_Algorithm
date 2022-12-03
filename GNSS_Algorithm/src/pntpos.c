@@ -67,7 +67,7 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys)
     }
     if (el<MIN_EL) el=MIN_EL;
     /* var = R^2*(a^2 + (b^2/sin(el) + c^2*(10^(0.1*(snr_max-snr_rover)))) + (d*rcv_std)^2) */
-    varr=SQR(opt->err[1])+SQR(opt->err[2])/sin(el);
+    varr=SQR(opt->err[1])+SQR(opt->err[2])/SQR(sin(el))/SQR(sin(el));
     if (opt->err[6]>0.0) {  /* if snr term not zero */
 		snr_rover = SNR_UNIT*obs->SNR[0];
         varr+=SQR(opt->err[6])*pow(10,0.1*MAX(opt->err[5]-snr_rover,0));
@@ -82,7 +82,7 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys)
 /* doppler measurement error variance ------------------------------------*/
 static double varerr_dop(const prcopt_t *opt, const obsd_t *obs, double el, int sys)
 {
-    double fact=0.01,varr,snr_rover;
+    double fact=0.002,varr,snr_rover;
 
 	switch (sys) {
         case SYS_GPS: fact *= EFACT_GPS; break;
@@ -570,7 +570,7 @@ static int rescode_mulfreq(int iter, const obsd_t *obs, int n, const double *rs,
 	int i, j, nv = 0, sat, sys, mask[NX - 3] = { 0 };
 	int freq_idx, nf;
 
-	trace(3, "resprng : n=%d\n", n);
+	trace(3, "rescode_mulfreq : n=%d\n", n);
 
 	nf = (opt->spp_mode == SPP_MODE_LX) ? opt->nf : 1;
 	for (i = 0; i < 3; i++)
@@ -689,7 +689,7 @@ static int rescode_mulfreq(int iter, const obsd_t *obs, int n, const double *rs,
 			/* variance of pseudorange error */
 			var[nv++] = varerr(opt, &obs[i], azel[1 + i * 2], sys) + vare[i] + vmeas + vion + vtrp;
 
-			trace(4, "sat=%2d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n", obs[i].sat,
+			trace(4, "sat=%3d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n", obs[i].sat,
 				azel[i * 2] * R2D, azel[1 + i * 2] * R2D, resp[i], sqrt(var[nv - 1]));
 		}
 		(*ns)++;
@@ -718,7 +718,7 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 	int i, j, nv = 0, sat, sys, mask[NX - 3] = { 0 };
 	int freq_idx, nf;
 
-	trace(3, "resprng : n=%d\n", n);
+	trace(3, "rescode_mulfreq_ekf : n=%d\n", n);
 
 	nf = (opt->spp_mode == SPP_MODE_LX) ? opt->nf : 1;
 	for (i = 0; i < 3; i++)
@@ -835,10 +835,10 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 			resp[i] = v[nv];
 
 			/* variance of pseudorange error */
-			var[nv++] = varerr(opt, &obs[i], azel[1 + i * 2], sys) + vare[i] + vmeas + vion + vtrp;
+			var[nv++] = varerr(opt, &obs[i], azel[1 + i * 2], sys);
 			// var[nv++] = SQR(1);
 
-			trace(3, "sat=%2d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n", obs[i].sat,
+			trace(3, "sat=%3d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n", obs[i].sat,
 				azel[i * 2] * R2D, azel[1 + i * 2] * R2D, resp[i], sqrt(var[nv - 1]));
 		}
 		(*ns)++;
@@ -862,7 +862,7 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
     double freq, rate, pos[3], E[9], a[3], e[3], vs[3], cosel, sig, e_ref[3] = {0.0}, v_ref = 0.0;
     int i, j, nv = 0, sys, freq_idx;
 
-    trace(3, "resdop  : n=%d\n", n);
+    trace(3, "resdop_mulfreq_filter  : n=%d\n", n);
 
     ecef2pos(rr, pos);
     xyz2enu(pos, E);
@@ -925,6 +925,9 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
                 continue;
             }
             nv++;
+
+			trace(3, "sat=%3d SNR=%2d azel=%5.1f %4.1f residual=%7.3f sig=%5.3f\n", obs[i].sat, obs[i].SNR[freq_idx],
+				azel[i * 2] * R2D, azel[1 + i * 2] * R2D, v[nv-1], sqrt(var[nv - 1]));
         }
     }
     return nv;
@@ -1131,11 +1134,11 @@ static void udpos_spp(rtk_t *rtk, double tt)
 	}
 	/*trace the mat*/
 	trace(3, "F=\n");
-	tracemat(3, F, nx, nx, 3, 3);
+	tracemat(3, F, nx, nx, 7, 3);
 	trace(3, "x=\n");
-	tracemat(3, x, 1, nx, 3, 3);
+	tracemat(3, x, 1, nx, 7, 3);
 	trace(3, "P=\n");
-	tracemat(3, P, nx, nx, 3, 3);
+	tracemat(3, P, nx, nx, 7, 3);
 
 	/* x=F*x, P=F*P*F+Q */
 	matmul("NN", nx, 1, nx, 1.0, F, x, 0.0, xp);
@@ -1144,9 +1147,9 @@ static void udpos_spp(rtk_t *rtk, double tt)
 
 	/*trace the mat*/
 	trace(3, "xp=\n");
-	tracemat(3, xp, 1, nx, 3, 3);
+	tracemat(3, xp, 1, nx, 7, 3);
 	trace(3, "P2=\n");
-	tracemat(3, P, nx, nx, 3, 3);
+	tracemat(3, P, nx, nx, 7, 3);
 
 	for (i = 0; i < nx; i++)
 	{
@@ -1279,24 +1282,24 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 
 		/*debug trace*/
 		trace(trace_level_filter, "before_x=\n");
-		tracemat(trace_level_filter, x, 1, col_num, 3, 3);
+		tracemat(trace_level_filter, x, 1, col_num, 7, 3);
 		trace(trace_level_filter, "before_P=\n");
-		tracemat(trace_level_filter, P, col_num, col_num, 3, 3);
+		tracemat(trace_level_filter, P, col_num, col_num, 7, 3);
 		trace(trace_level_filter, "before_H=\n");
-		tracemat(trace_level_filter, H, col_num, nv, 3, 3);
+		tracemat(trace_level_filter, H, col_num, nv, 7, 3);
 		trace(trace_level_filter, "before_v=\n");
-		tracemat(trace_level_filter, v, nv, 1, 3, 3);
+		tracemat(trace_level_filter, v, 1, nv, 7, 3);
 		trace(trace_level_filter, "before_R=\n");
-		tracemat(trace_level_filter, R, nv, nv, 3, 3);
+		tracemat(trace_level_filter, R, nv, nv, 7, 3);
 		/* kalman estimation */
 		if ((info = filter(x, P, H, v, R, NX_F, nv)))
 		{
 			return -2;
 		}
 		trace(trace_level_filter, "after_x=\n");
-		tracemat(trace_level_filter, x, 1, col_num, 3, 3);
+		tracemat(trace_level_filter, x, 1, col_num, 7, 3);
 		trace(trace_level_filter, "after_P=\n");
-		tracemat(trace_level_filter, P, col_num, col_num, 3, 3);
+		tracemat(trace_level_filter, P, col_num, col_num, 7, 3);
 		stat = SOLQ_SINGLE;
 	}
 

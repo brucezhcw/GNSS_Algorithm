@@ -206,11 +206,11 @@ const prcopt_t prcopt_default={ /* defaults processing options */
     10.0*D2R,{{0,0}},           /* elmin,snrmask */
     0,3,3,1,1,1,                /* sateph,modear,glomodear,gpsmodear,bdsmodear,arfilter */
     20,0,4,5,10,20,             /* maxout,minlock,minfixsats,minholdsats,mindropsats,minfix */
-    1,3,0,1,0,                  /* armaxiter,estion,esttrop,dynamics,tidecorr */
+    1,1,0,1,0,                  /* armaxiter,estion,esttrop,dynamics,tidecorr */
     1,0,0,0,0,                  /* niter,codesmooth,intpref,sbascorr,sbassatsel */
     0,0,                        /* rovpos,refpos */
     {300.0,100.0,100.0},        /* eratio[] */
-    {100.0,0.003,0.003,0.0,1.0,52.0,0.0,0.0}, /* err[-,base,el,bl,dop,snr_max,snr,rcverr] */
+    {100.0,0.01,0.01,0.0,1.0,52.0,0.0,0.0}, /* err[-,base,el,bl,dop,snr_max,snr,rcverr] */
     {30.0,0.03,0.3},            /* std[] */
     {1E-4,1E-3,1E-4,3.0,1.0,0.0}, /* prn[] */
     5E-12,                      /* sclkstab */
