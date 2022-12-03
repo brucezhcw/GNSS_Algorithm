@@ -1,4 +1,4 @@
-/*------------------------------------------------------------------------------
+﻿/*------------------------------------------------------------------------------
 * pntpos.c : standard positioning
 *
 *          Copyright (C) 2007-2020 by T.TAKASU, All rights reserved.
@@ -46,10 +46,10 @@
 #define MIN_EL      (5.0*D2R)   /* min elevation for measurement error (rad) */
 # define MAX_GDOP   30          /* max gdop for valid solution  */
 
-#define VAR_POS     SQR(30.0)       /* initial variance of receiver pos (m^2) */
-#define VAR_VEL     SQR(10.0)       /* initial variance of receiver vel ((m/s)^2) */
-#define VAR_ACC     SQR(10.0)       /* initial variance of receiver acc ((m/ss)^2) */
-#define NX_F (9 + 1 + 4)  /*PVA, dt and delta dt between systems*/
+#define VAR_POS     SQR(30.0)	/* initial variance of receiver pos (m^2) */
+#define VAR_VEL     SQR(10.0)	/* initial variance of receiver vel ((m/s)^2) */
+#define VAR_ACC     SQR(10.0)	/* initial variance of receiver acc ((m/ss)^2) */
+#define NX_F		(9 + 1 + 4)	/* 位置*3 速度*3 加速度*3 接收机钟差*1 GNSS系统间群延迟*4 */
 
 /* pseudorange measurement error variance ------------------------------------*/
 static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys)
@@ -67,7 +67,7 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys)
     }
     if (el<MIN_EL) el=MIN_EL;
     /* var = R^2*(a^2 + (b^2/sin(el) + c^2*(10^(0.1*(snr_max-snr_rover)))) + (d*rcv_std)^2) */
-    varr=SQR(opt->err[1])+SQR(opt->err[2])/(el);
+    varr=SQR(opt->err[1])+SQR(opt->err[2])/sin(el);
     if (opt->err[6]>0.0) {  /* if snr term not zero */
 		snr_rover = SNR_UNIT*obs->SNR[0];
         varr+=SQR(opt->err[6])*pow(10,0.1*MAX(opt->err[5]-snr_rover,0));
@@ -76,8 +76,30 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys)
     if (opt->err[7]>0.0) {
         varr+=SQR(opt->err[7]*0.01*(1<<(obs->Pstd[0]+5)));  /* 0.01*2^(n+5) m */
     }
-	if (opt->ionoopt == IONOOPT_IFLC) varr *= 1;// SQR(3.0); /* iono-free */
+	if (opt->ionoopt == IONOOPT_IFLC) varr *= SQR(3.0); /* iono-free */
     return SQR(fact)*varr;
+}
+/* doppler measurement error variance ------------------------------------*/
+static double varerr_dop(const prcopt_t *opt, const obsd_t *obs, double el, int sys)
+{
+    double fact=0.01,varr,snr_rover;
+
+	switch (sys) {
+        case SYS_GPS: fact *= EFACT_GPS; break;
+        case SYS_GLO: fact *= EFACT_GLO; break;
+        case SYS_SBS: fact *= EFACT_SBS; break;
+        case SYS_CMP: fact *= EFACT_CMP; break;
+        case SYS_QZS: fact *= EFACT_QZS; break;
+        case SYS_IRN: fact *= EFACT_IRN; break;
+        default:      fact *= EFACT_GPS; break;
+    }
+
+    //if (el<MIN_EL) el=MIN_EL;
+    //varr=SQR(opt->err[1])+SQR(opt->err[2])/sin(el);
+	snr_rover = SNR_UNIT*obs->SNR[0];
+	varr = fact*pow(10, 0.1*MAX(opt->err[5] - snr_rover, 0));
+    
+    return varr;
 }
 /* get group delay parameter (m) ---------------------------------------------*/
 static double gettgd(int sat, const nav_t *nav, int type)
@@ -202,8 +224,7 @@ static double prange(const obsd_t *obs, const nav_t *nav, const prcopt_t *opt,
 	return PC;
 }
 /* psendorange with code bias correction -------------------------------------*/
-static double prange_mulfreq(const obsd_t *obs, const nav_t *nav, const prcopt_t *opt, const int k,
-	double *var)
+static double prange_mulfreq(const obsd_t *obs, const nav_t *nav, const prcopt_t *opt, const int k, double *var)
 {
 	double P1, P2, gamma, b1, b2, P, tgd;
 	int sat, sys;
@@ -834,6 +855,80 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 	}
 	return nv;
 }
+static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *rs, const double *dts,
+                                 const nav_t *nav, const double *rr, const prcopt_t *opt, const double *x,
+                                 const double *azel, const int *vsat, double *v, double *var, double *H)
+{
+    double freq, rate, pos[3], E[9], a[3], e[3], vs[3], cosel, sig, e_ref[3] = {0.0}, v_ref = 0.0;
+    int i, j, nv = 0, sys, freq_idx;
+
+    trace(3, "resdop  : n=%d\n", n);
+
+    ecef2pos(rr, pos);
+    xyz2enu(pos, E);
+
+    for (i = 0; i < n && i < MAXOBS; i++)
+    {
+
+        if (!(sys = satsys(obs[i].sat, NULL)) || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0)
+        {
+            continue;
+        }
+
+        /* LOS (line-of-sight) vector in ECEF */
+        cosel = cos(azel[1 + i * 2]);
+        a[0] = sin(azel[i * 2]) * cosel;
+        a[1] = cos(azel[i * 2]) * cosel;
+        a[2] = sin(azel[1 + i * 2]);
+        matmul("TN", 3, 1, 3, 1.0, E, a, 0.0, e);
+
+        /* satellite velocity relative to receiver in ECEF */
+        for (j = 0; j < 3; j++)
+        {
+            vs[j] = rs[j + 3 + i * 6] - x[j];
+        }
+
+        /* range rate with earth rotation correction */
+        rate = dot(vs, e, 3) + OMGE / CLIGHT * (rs[4 + i * 6] * rr[0] + rs[1 + i * 6] * x[0] - rs[3 + i * 6] * rr[1] - rs[i * 6] * x[1]);
+
+        for (freq_idx = 0; freq_idx < opt->nf; freq_idx++)
+        {
+            freq = sat2freq(obs[i].sat, obs[i].code[freq_idx], nav);
+
+            if (obs[i].D[freq_idx] == 0.0 || freq == 0.0)
+            {
+                continue;
+            }
+
+            /* range rate residual (m/s). */
+            v[nv] = (-obs[i].D[freq_idx] * CLIGHT / freq - (rate - CLIGHT * dts[1 + i * 2])) - v_ref;
+
+            /* variance of pseudorange error */
+			var[nv] = varerr_dop(opt, &obs[i], azel[1 + i * 2], sys);
+
+            /* design matrix */
+            for (j = 0; j < 3; j++)
+            {
+                H[j + 3 + nv * NX_F] = -e[j] - e_ref[j];
+            }
+            if (v_ref == 0.0)
+            {
+                v_ref = v[nv];
+                for (j = 0; j < 3; j++)
+                {
+                    e_ref[j] = -e[j];
+                }
+                continue;
+            }
+            if (fabs(H[3 + nv * NX_F]) < 1e-8)
+            {
+                continue;
+            }
+            nv++;
+        }
+    }
+    return nv;
+}
 /* validate solution ---------------------------------------------------------*/
 static int valsol(const double *azel, const int *vsat, int n,
                   const prcopt_t *opt, const double *v, int nv, int nx,
@@ -1111,7 +1206,7 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 {
 	double x[NX_F] = { 0 }, P[NX_F * NX_F], *v, *H, *var, *R, sig;
 	int i, j, k, info, stat = 0, nv, ns;
-	int row_num = n + 4, col_num = NX_F;
+	int row_num = n + 4 + n* rtk->opt.nf, col_num = NX_F;
 	double dt = 0.0;
 	char msg[128] = "";
 	sol_t *sol = &rtk->sol;
@@ -1129,13 +1224,13 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 		for (i = 0; i < 3; i++)
 			initx(rtk, sol->rr[i], VAR_POS, i);
 		for (i = 3; i < 6; i++)
-			initx(rtk, 0.01, VAR_VEL, i);
+			initx(rtk, 0.1, VAR_VEL, i);
 		for (i = 6; i < 9; i++)
-			initx(rtk, 1E-6, VAR_ACC, i);
+			initx(rtk, 1E-2, VAR_ACC, i);
 
 		for (i = 9; i < NX_F; i++)
 		{
-			initx(rtk, 0.001, SQR(1000), i);
+			initx(rtk, 0.1, SQR(100), i);
 		}
 		return stat;
 	}
@@ -1145,17 +1240,17 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 
 		/* add the receiver clk process noise */
 		for (i = 9; i < NX_F; i++){
-			rtk->P_spp[i + i * NX_F] += SQR(10);
+			rtk->P_spp[i + i * NX_F] += SQR(0.01);
 		}
 	}
 
 	if (rtk->opt.spp_mode == SPP_MODE_LX)
 	{
-		row_num = n * rtk->opt.nf + 4;
+		row_num = 2 * n * rtk->opt.nf + 4;
 	}
 
 	v = mat(row_num, 1);
-	H = mat(col_num, row_num);
+	H = zeros(col_num, row_num);
 	var = mat(row_num, 1);
 	R = zeros(row_num, row_num);
 
@@ -1165,8 +1260,7 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	for (i = 0; i < 1; i++)
 	{
 		/* pseudorange residuals (m) */
-		nv = rescode_mulfreq_ekf(1, obs, n, rs, dts, vare, svh, nav, x, &rtk->opt, v, H, var, azel, vsat, resp,
-			&ns);
+		nv = rescode_mulfreq_ekf(1, obs, n, rs, dts, vare, svh, nav, x, &rtk->opt, v, H, var, azel, vsat, resp, &ns);
 
 		if (ns < NX)
 		{
@@ -1175,17 +1269,7 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 
 		insert_vel_acc_colums(nv, H);
 
-		/* add velocity constrain of static mode */
-		//for (j = 3; j < 6; j++)
-		//{
-		//	for (k = 0; k < NX_F; k++) {
-		//		H[k + nv * NX_F] = 0.0;
-		//	}
-		//	H[j + nv * NX_F] = 1.0;
-		//	v[nv] = 0.0 - x[j];
-		//	var[nv] = SQR(0.001);
-		//	nv++;
-		//}
+		nv += resdop_mulfreq_filter(obs, n, rs, dts, nav, x, &rtk->opt, x + 3, azel, vsat, v + nv, var + nv, H + nv * NX_F);
 
 		/* weighted by Std */
 		for (j = 0; j < nv; j++)
