@@ -85,7 +85,7 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys,
 /* doppler measurement error variance ------------------------------------*/
 static double varerr_dop(const prcopt_t *opt, const obsd_t *obs, double el, int sys, int freq)
 {
-    double fact=0.002,varr,snr_rover;
+    double fact=0.0003,varr,snr_rover;
 
 	if (freq == 1) fact *= 1.0;
 	else if (freq == 2) fact *= 0.9;
@@ -841,8 +841,13 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 			resp[i] = v[nv];
 
 			/* variance of pseudorange error */
-			var[nv++] = varerr(opt, &obs[i], azel[1 + i * 2], sys, freq_idx);
-			// var[nv++] = SQR(1);
+			var[nv] = varerr(opt, &obs[i], azel[1 + i * 2], sys, freq_idx);
+			if (v[nv]<-15 || v[nv]>15) var[nv] *= SQR(30);
+			else if (fabs(v[nv])>10)
+			{
+				var[nv] *= SQR(fabs(v[nv]) / 10);
+			}
+			nv++;
 
 			trace(3, "sat=%3d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n", obs[i].sat,
 				azel[i * 2] * R2D, azel[1 + i * 2] * R2D, resp[i], sqrt(var[nv - 1]));
@@ -967,8 +972,13 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
             /* range rate residual (m/s). */
             v[nv] = (-obs[i].D[freq_idx] * CLIGHT / freq - (rate - CLIGHT * dts[1 + i * 2])) - v_ref;
 
-            /* variance of pseudorange error */
+            /* variance of doppler error */
 			var[nv] = varerr_dop(opt, &obs[i], azel[1 + i * 2], sys, freq_idx);
+			if (v[nv]<-1.0 || v[nv]>1.0) var[nv] *= SQR(30);
+			else if (fabs(v[nv])>0.5)
+			{
+				var[nv] *= SQR(fabs(v[nv]) / 0.5);
+			}
 
             /* design matrix */
             for (j = 0; j < 3; j++)
@@ -976,13 +986,9 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
                 H[j + 3 + nv * NX_F] = -e[j] - e_ref[j];
             }
             
-            if (fabs(H[3 + nv * NX_F]) < 1e-8)
-            {
-                continue;
-            }
             nv++;
 
-			trace(3, "sat=%3d SNR=%2d azel=%5.1f %4.1f residual=%7.3f sig=%5.3f\n", obs[i].sat, obs[i].SNR[freq_idx],
+			trace(3, "sat=%3d f=%1d SNR=%2d azel=%5.1f %4.1f residual=%7.3f sig=%5.3f\n", obs[i].sat, freq_idx+1, obs[i].SNR[freq_idx],
 				azel[i * 2] * R2D, azel[1 + i * 2] * R2D, v[nv-1], sqrt(var[nv - 1]));
         }
     }

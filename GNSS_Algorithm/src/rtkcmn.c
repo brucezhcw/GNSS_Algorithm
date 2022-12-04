@@ -202,7 +202,7 @@ const double chisqr[100]={      /* chi-sqr(n) (alpha=0.001) */
     138 ,139 ,140 ,142 ,143 ,144 ,145 ,147 ,148 ,149
 };
 const prcopt_t prcopt_default={ /* defaults processing options */
-    PMODE_KINEMA,0,3,SYS_GPS|SYS_GAL|SYS_CMP,   /* mode,soltype,nf,navsys */
+    PMODE_KINEMA,0,3,SYS_GPS|SYS_GAL|SYS_CMP|SYS_GLO,   /* mode,soltype,nf,navsys */
     10.0*D2R,{{0,0}},           /* elmin,snrmask */
     0,3,3,1,1,1,                /* sateph,modear,glomodear,gpsmodear,bdsmodear,arfilter */
     20,0,4,5,10,20,             /* maxout,minlock,minfixsats,minholdsats,mindropsats,minfix */
@@ -210,7 +210,7 @@ const prcopt_t prcopt_default={ /* defaults processing options */
     1,0,0,0,0,                  /* niter,codesmooth,intpref,sbascorr,sbassatsel */
     0,0,                        /* rovpos,refpos */
     {300.0,100.0,100.0},        /* eratio[] */
-    {100.0,0.01,0.01,0.0,1.0,52.0,0.0,0.0}, /* err[-,base,el,bl,dop,snr_max,snr,rcverr] */
+    {100.0,0.001,0.01,0.0,1.0,52.0,0.0,0.0}, /* err[-,base,el,bl,dop,snr_max,snr,rcverr] */
     {30.0,0.03,0.3},            /* std[] */
     {1E-4,1E-3,1E-4,3.0,1.0,0.0}, /* prn[] */
     5E-12,                      /* sclkstab */
