@@ -72,12 +72,12 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys,
     /* var = R^2*(a^2 + (b^2/sin(el) + c^2*(10^(0.1*(snr_max-snr_rover)))) + (d*rcv_std)^2) */
     varr=SQR(opt->err[1])+SQR(opt->err[2])/SQR(sin(el))/(sin(el));
     if (opt->err[6]>0.0) {  /* if snr term not zero */
-		snr_rover = SNR_UNIT*obs->SNR[0];
+		snr_rover = SNR_UNIT*obs->SNR[freq];
         varr+=SQR(opt->err[6])*pow(10,0.1*MAX(opt->err[5]-snr_rover,0));
     }
     varr*=SQR(opt->eratio[0]);
     if (opt->err[7]>0.0) {
-        varr+=SQR(opt->err[7]*0.01*(1<<(obs->Pstd[0]+5)));  /* 0.01*2^(n+5) m */
+        varr+=SQR(opt->err[7]*0.01*(1<<(obs->Pstd[freq]+5)));  /* 0.01*2^(n+5) m */
     }
 	if (opt->ionoopt == IONOOPT_IFLC) varr *= SQR(3.0); /* iono-free */
     return SQR(fact)*varr;
@@ -88,7 +88,7 @@ static double varerr_dop(const prcopt_t *opt, const obsd_t *obs, double el, int 
     double fact=0.002,varr,snr_rover;
 
 	if (freq == 1) fact *= 1.0;
-	else if (freq == 2) fact *= 0.6;
+	else if (freq == 2) fact *= 0.9;
 
 	switch (sys) {
         case SYS_GPS: fact *= EFACT_GPS; break;
@@ -102,7 +102,7 @@ static double varerr_dop(const prcopt_t *opt, const obsd_t *obs, double el, int 
 
     //if (el<MIN_EL) el=MIN_EL;
     //varr=SQR(opt->err[1])+SQR(opt->err[2])/sin(el);
-	snr_rover = SNR_UNIT*obs->SNR[0];
+	snr_rover = SNR_UNIT*obs->SNR[freq];
 	varr = fact*pow(10, 0.1*MAX(opt->err[5] - snr_rover, 0));
     
     return varr;
