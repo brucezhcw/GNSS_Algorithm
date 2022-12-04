@@ -57,7 +57,7 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys,
     double fact=1.0,varr,snr_rover;
 
 	if (freq == 1) fact *= 0.9;
-	else if (freq == 2) fact *= 0.85;
+	else if (freq == 2) fact *= 0.6;
 
     switch (sys) {
         case SYS_GPS: fact *= EFACT_GPS; break;
@@ -70,7 +70,7 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys,
     }
     if (el<MIN_EL) el=MIN_EL;
     /* var = R^2*(a^2 + (b^2/sin(el) + c^2*(10^(0.1*(snr_max-snr_rover)))) + (d*rcv_std)^2) */
-    varr=SQR(opt->err[1])+SQR(opt->err[2])/SQR(sin(el))/SQR(sin(el));
+    varr=SQR(opt->err[1])+SQR(opt->err[2])/SQR(sin(el))/(sin(el));
     if (opt->err[6]>0.0) {  /* if snr term not zero */
 		snr_rover = SNR_UNIT*obs->SNR[0];
         varr+=SQR(opt->err[6])*pow(10,0.1*MAX(opt->err[5]-snr_rover,0));
@@ -88,7 +88,7 @@ static double varerr_dop(const prcopt_t *opt, const obsd_t *obs, double el, int 
     double fact=0.002,varr,snr_rover;
 
 	if (freq == 1) fact *= 1.0;
-	else if (freq == 2) fact *= 0.95;
+	else if (freq == 2) fact *= 0.6;
 
 	switch (sys) {
         case SYS_GPS: fact *= EFACT_GPS; break;
@@ -1071,7 +1071,7 @@ static void udpos_spp(rtk_t *rtk, double tt)
 	double *F, *P, *FP, *x, *xp, pos[3], Q[9] = { 0 }, Qv[9], var = 0.0;
 	int i, j, *ix, nx;
 
-	trace(3, "udpos   : tt=%.3f\n", tt);
+	trace(3, "udpos_spp   : tt=%.3f\n", tt);
 
 	/* initialize position for first epoch */
 	if (norm(rtk->x_spp, 3) <= 0.0)
@@ -1088,7 +1088,7 @@ static void udpos_spp(rtk_t *rtk, double tt)
 	for (i = 0; i < 3; i++)
 		var += rtk->P_spp[i + i * NX_F];
 	var /= 3.0;
-
+	trace(3, "EKF pos var: %.4f\n", var);
 	if (var > VAR_POS)
 	{
 		/* reset position with large variance */
@@ -1098,7 +1098,7 @@ static void udpos_spp(rtk_t *rtk, double tt)
 			initx(rtk, rtk->sol.rr[i], VAR_VEL, i);
 		for (i = 6; i < 9; i++)
 			initx(rtk, 1E-6, VAR_ACC, i);
-		trace(2, "reset rtk position due to large variance: var=%.3f\n", var);
+		trace(2, "reset EKF position due to large variance: var=%.3f\n", var);
 		return;
 	}
 	/* generate valid state index */
@@ -1126,9 +1126,12 @@ static void udpos_spp(rtk_t *rtk, double tt)
 	{
 		F[i + (i + 3) * nx] = tt;
 	}
-	for (i = 0; i < 3; i++)
-	{
-		F[i + (i + 6) * nx] = SQR(tt) / 2.0;
+	if (var < 5.0)
+	{ /* include accel terms if EKF filter is converged */
+		for (i = 0; i < 3; i++)
+		{
+			F[i + (i + 6) * nx] = SQR(tt) / 2.0;
+		}
 	}
 	for (i = 0; i < nx; i++)
 	{
@@ -1138,14 +1141,6 @@ static void udpos_spp(rtk_t *rtk, double tt)
 			P[i + j * nx] = rtk->P_spp[ix[i] + ix[j] * NX_F];
 		}
 	}
-	/*trace the mat*/
-	trace(3, "F=\n");
-	tracemat(3, F, nx, nx, 7, 3);
-	trace(3, "x=\n");
-	tracemat(3, x, 1, nx, 7, 3);
-	trace(3, "P=\n");
-	tracemat(3, P, nx, nx, 7, 3);
-
 	/* x=F*x, P=F*P*F+Q */
 	matmul("NN", nx, 1, nx, 1.0, F, x, 0.0, xp);
 	matmul("NN", nx, nx, nx, 1.0, F, P, 0.0, FP);
@@ -1154,7 +1149,7 @@ static void udpos_spp(rtk_t *rtk, double tt)
 	/*trace the mat*/
 	trace(3, "xp=\n");
 	tracemat(3, xp, 1, nx, 7, 3);
-	trace(3, "P2=\n");
+	trace(3, "Pp=\n");
 	tracemat(3, P, nx, nx, 7, 3);
 
 	for (i = 0; i < nx; i++)
@@ -1166,8 +1161,8 @@ static void udpos_spp(rtk_t *rtk, double tt)
 		}
 	}
 	/* process noise added to only acceleration */
-	Q[0] = Q[4] = SQR(rtk->opt.prn[3]) * fabs(tt);
-	Q[8] = SQR(rtk->opt.prn[4]) * fabs(tt);
+	Q[0] = Q[4] = SQR(3.0) * fabs(tt);
+	Q[8] = SQR(2.0) * fabs(tt);
 	ecef2pos(rtk->x_spp, pos);
 	covecef(pos, Q, Qv);
 	for (i = 0; i < 3; i++)
@@ -1221,7 +1216,7 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	sol_t *sol = &rtk->sol;
 	int trace_level_filter = 3;
 
-	trace(3, "estpos_ekf  : n=%d\n", n);
+	trace(3, "estpos_ekf: n=%d\n", n);
 
 	dt = timediff(obs[0].time, sol->time);
 
@@ -1229,6 +1224,9 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	if (norm(rtk->x_spp, 3) < 1000)
 	{
 		stat = pntpos(obs, n, nav, &rtk->opt, sol, azel, rtk->ssat, msg);
+
+		if (stat == SOLQ_NONE || sol->ns < 10) return stat;
+
 		init_spp(rtk);
 		for (i = 0; i < 3; i++)
 			initx(rtk, sol->rr[i], VAR_POS, i);
@@ -1239,17 +1237,17 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 
 		for (i = 9; i < NX_F; i++)
 		{
-			initx(rtk, 0.1, SQR(100), i);
+			initx(rtk, 0.1, SQR(15), i);
 		}
 		return stat;
 	}
 	else
 	{
 		udpos_spp(rtk, dt);
-
+		rtk->P_spp[9 + 9 * NX_F] += SQR(3.0);
 		/* add the receiver clk process noise */
-		for (i = 9; i < NX_F; i++){
-			rtk->P_spp[i + i * NX_F] += SQR(0.01);
+		for (i = 10; i < NX_F; i++){
+			rtk->P_spp[i + i * NX_F] += SQR(0.1);
 		}
 	}
 
@@ -1595,8 +1593,8 @@ extern int pntpos_ekf(const obsd_t *obs, const int n, const nav_t *nav, rtk_t *r
 	double *rs, *dts, *var, *azel_, *resp;
 	int i, stat, vsat[MAXOBS] = { 0 }, svh[MAXOBS];
 
-	trace(3, "pntpos_ekf  : tobs=%s n=%d\n", time_str(obs[0].time, 3), n);
-	printf("pntpos_ekf  : tobs=%s nobs=%d\n", time_str(obs[0].time, 3), n);
+	trace(3, "pntpos_ekf: tobs=%s nobs=%d\n", time_str(obs[0].time, 3), n);
+	printf("pntpos_ekf: tobs=%s nobs=%d\n", time_str(obs[0].time, 3), n);
 	/* init spp state*/
 	if (rtk->x_spp == NULL || rtk->P_spp == NULL){
 		init_spp(rtk);
