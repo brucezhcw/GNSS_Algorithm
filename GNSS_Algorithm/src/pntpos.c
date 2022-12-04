@@ -865,13 +865,69 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
                                  const nav_t *nav, const double *rr, const prcopt_t *opt, const double *x,
                                  const double *azel, const int *vsat, double *v, double *var, double *H)
 {
-    double freq, rate, pos[3], E[9], a[3], e[3], vs[3], cosel, sig, e_ref[3] = {0.0}, v_ref = 0.0;
-    int i, j, nv = 0, sys, freq_idx;
+    double freq, rate, pos[3], E[9], a[3], e[3], vs[3], cosel, sig, e_ref[3] = {0.0}, v_ref = 0.0, ele_ref=0.0;
+    int i, j, nv = 0, sys, freq_idx, SNR_ref=0, ind_ref=-1, freq_ref=-1;;
 
     trace(3, "resdop_mulfreq_filter  : n=%d\n", n);
 
     ecef2pos(rr, pos);
     xyz2enu(pos, E);
+
+	for (i = 0; i < n && i < MAXOBS; i++)
+    {
+
+        if (!(sys = satsys(obs[i].sat, NULL)) || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0)
+        {
+            continue;
+        }
+
+        for (freq_idx = 0; freq_idx < opt->nf; freq_idx++)
+        {
+            freq = sat2freq(obs[i].sat, obs[i].code[freq_idx], nav);
+
+            if (obs[i].D[freq_idx] == 0.0 || freq == 0.0)
+            {
+                continue;
+            }
+
+			if (ind_ref == -1 || (obs[i].SNR[freq_idx]>=SNR_ref && azel[1 + i * 2] * R2D>ele_ref) ||
+								 (obs[i].SNR[freq_idx]>SNR_ref && azel[1 + i * 2] * R2D>ele_ref-10))
+            {
+				ele_ref = azel[1 + i * 2] * R2D;
+				SNR_ref = obs[i].SNR[freq_idx];
+				ind_ref = i;
+				freq_ref = freq_idx;
+            }
+        }
+    }
+
+	if (ind_ref == -1) return 0;
+
+	/* LOS (line-of-sight) vector in ECEF */
+	cosel = cos(azel[1 + ind_ref * 2]);
+	a[0] = sin(azel[ind_ref * 2]) * cosel;
+	a[1] = cos(azel[ind_ref * 2]) * cosel;
+	a[2] = sin(azel[1 + ind_ref * 2]);
+	matmul("TN", 3, 1, 3, 1.0, E, a, 0.0, e);
+
+	/* satellite velocity relative to receiver in ECEF */
+	for (j = 0; j < 3; j++)
+	{
+		vs[j] = rs[j + 3 + ind_ref * 6] - x[j];
+	}
+
+	/* range rate with earth rotation correction */
+	rate = dot(vs, e, 3) + OMGE / CLIGHT * (rs[4 + ind_ref * 6] * rr[0] + rs[1 + ind_ref * 6] * x[0] - rs[3 + ind_ref * 6] * rr[1] - rs[ind_ref * 6] * x[1]);
+
+	freq = sat2freq(obs[ind_ref].sat, obs[ind_ref].code[freq_ref], nav);
+
+	/* range rate residual (m/s). */
+	v_ref = (-obs[ind_ref].D[freq_ref] * CLIGHT / freq - (rate - CLIGHT * dts[1 + ind_ref * 2]));
+	for (j = 0; j < 3; j++)
+	{
+		e_ref[j] = -e[j];
+	}
+	trace(3, "reference sat=%3d f=%1d SNR=%2d azel=%5.1f %4.1f\n", obs[ind_ref].sat, freq_ref+1, SNR_ref, azel[ind_ref * 2] * R2D, ele_ref);
 
     for (i = 0; i < n && i < MAXOBS; i++)
     {
@@ -906,6 +962,8 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
                 continue;
             }
 
+			if (i == ind_ref && freq_idx == freq_ref) continue;
+
             /* range rate residual (m/s). */
             v[nv] = (-obs[i].D[freq_idx] * CLIGHT / freq - (rate - CLIGHT * dts[1 + i * 2])) - v_ref;
 
@@ -917,15 +975,7 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
             {
                 H[j + 3 + nv * NX_F] = -e[j] - e_ref[j];
             }
-            if (v_ref == 0.0)
-            {
-                v_ref = v[nv];
-                for (j = 0; j < 3; j++)
-                {
-                    e_ref[j] = -e[j];
-                }
-                continue;
-            }
+            
             if (fabs(H[3 + nv * NX_F]) < 1e-8)
             {
                 continue;
