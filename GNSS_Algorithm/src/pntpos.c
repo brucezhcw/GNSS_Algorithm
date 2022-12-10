@@ -54,7 +54,7 @@
 /* pseudorange measurement error variance ------------------------------------*/
 static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys, int freq)
 {
-    double fact=1.0,varr,snr_rover;
+    double fact=1.0,varr,snr_rover,snrweight;
 
 	if (freq == 1) fact *= 0.9;
 	else if (freq == 2) fact *= 0.6;
@@ -71,10 +71,10 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys,
     if (el<MIN_EL) el=MIN_EL;
     /* var = R^2*(a^2 + (b^2/sin(el) + c^2*(10^(0.1*(snr_max-snr_rover)))) + (d*rcv_std)^2) */
     varr=SQR(opt->err[1])+SQR(opt->err[2])/SQR(sin(el))/(sin(el));
-    if (opt->err[6]>0.0) {  /* if snr term not zero */
-		snr_rover = SNR_UNIT*obs->SNR[freq];
-        varr+=SQR(opt->err[6])*pow(10,0.1*MAX(opt->err[5]-snr_rover,0));
-    }
+	snr_rover = SNR_UNIT*obs->SNR[freq];
+	snrweight = pow(10, (snr_rover - 50) / 30)*(1 - 1.460255716*(snr_rover - 50) / 40);
+	snrweight = snrweight < 0.5 ? 0.5 : snrweight;
+	//varr *= snr_rover >= 50 ? 1 : snrweight;
     varr*=SQR(opt->eratio[0]);
     if (opt->err[7]>0.0) {
         varr+=SQR(opt->err[7]*0.01*(1<<(obs->Pstd[freq]+5)));  /* 0.01*2^(n+5) m */
@@ -1646,11 +1646,10 @@ extern int pntpos(const obsd_t *obs, int n, const nav_t *nav,
 
 extern int pntpos_ekf(const obsd_t *obs, const int n, const nav_t *nav, rtk_t *rtk)
 {
-	double *rs, *dts, *var, *azel_, *resp;
+	double *rs, *dts, *var, *azel_, *resp,pos[3];
 	int i, stat, vsat[MAXOBS] = { 0 }, svh[MAXOBS];
 
 	trace(3, "pntpos_ekf: tobs=%s nobs=%d\n", time_str(obs[0].time, 3), n);
-	printf("pntpos_ekf: tobs=%s nobs=%d\n", time_str(obs[0].time, 3), n);
 	/* init spp state*/
 	if (rtk->x_spp == NULL || rtk->P_spp == NULL){
 		init_spp(rtk);
@@ -1672,6 +1671,9 @@ extern int pntpos_ekf(const obsd_t *obs, const int n, const nav_t *nav, rtk_t *r
 
 	/* estimate receiver position with pseudorange */
 	stat = estpos_ekf(obs, n, rs, dts, var, svh, nav, azel_, vsat, resp, rtk);
+	ecef2pos(rtk->sol.rr, pos);
+	trace(3, "estpos_ekf: stat=%d time=%s position=%.8lf %.8lf %.2lf\n", stat, time_str(obs[0].time, 3), pos[0] * R2D, pos[1] * R2D, pos[2]);
+	printf("estpos_ekf: stat=%d time=%s nobs=%d position=%.8lf %.8lf %.2lf\n", stat, time_str(obs[0].time, 3), n, pos[0] * R2D, pos[1] * R2D, pos[2]);
 
 	free(rs);
 	free(dts);
