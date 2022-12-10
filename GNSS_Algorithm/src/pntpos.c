@@ -72,9 +72,10 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys,
     /* var = R^2*(a^2 + (b^2/sin(el) + c^2*(10^(0.1*(snr_max-snr_rover)))) + (d*rcv_std)^2) */
     varr=SQR(opt->err[1])+SQR(opt->err[2])/SQR(sin(el))/(sin(el));
 	snr_rover = SNR_UNIT*obs->SNR[freq];
+	//pow(10, (snr_rover - 50) / 30)*(1 - (30/(pow(10,(50-10)/30)-1))*(snr_rover - 50) / (50-10));
 	snrweight = pow(10, (snr_rover - 50) / 30)*(1 - 1.460255716*(snr_rover - 50) / 40);
-	snrweight = snrweight < 0.5 ? 0.5 : snrweight;
-	//varr *= snr_rover >= 50 ? 1 : snrweight;
+	varr /= (snr_rover >= 50 ? 1 : snrweight);
+	//varr=0.64 + 784 * pow(2.71828,-0.142 * obs->SNR[freq]);
     varr*=SQR(opt->eratio[0]);
     if (opt->err[7]>0.0) {
         varr+=SQR(opt->err[7]*0.01*(1<<(obs->Pstd[freq]+5)));  /* 0.01*2^(n+5) m */
@@ -849,8 +850,8 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 			}
 			nv++;
 
-			trace(3, "sat=%3d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n", obs[i].sat,
-				azel[i * 2] * R2D, azel[1 + i * 2] * R2D, resp[i], sqrt(var[nv - 1]));
+			trace(3, "sat=%3d azel=%5.1f %4.1f f=%1d snr=%2d res=%7.3f sig=%5.3f\n", obs[i].sat,
+				azel[i * 2] * R2D, azel[1 + i * 2] * R2D, freq_idx+1, obs[i].SNR[freq_idx], resp[i], sqrt(var[nv - 1]));
 		}
 		(*ns)++;
 	}
@@ -932,7 +933,7 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
 	{
 		e_ref[j] = -e[j];
 	}
-	trace(3, "reference sat=%3d f=%1d SNR=%2d azel=%5.1f %4.1f\n", obs[ind_ref].sat, freq_ref+1, SNR_ref, azel[ind_ref * 2] * R2D, ele_ref);
+	trace(3, "reference sat=%3d azel=%5.1f %4.1f f=%1d SNR=%2d\n", obs[ind_ref].sat, azel[ind_ref * 2] * R2D, ele_ref, freq_ref + 1, SNR_ref);
 
     for (i = 0; i < n && i < MAXOBS; i++)
     {
@@ -988,8 +989,8 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
             
             nv++;
 
-			trace(3, "sat=%3d f=%1d SNR=%2d azel=%5.1f %4.1f residual=%7.3f sig=%5.3f\n", obs[i].sat, freq_idx+1, obs[i].SNR[freq_idx],
-				azel[i * 2] * R2D, azel[1 + i * 2] * R2D, v[nv-1], sqrt(var[nv - 1]));
+			trace(3, "sat=%3d azel=%5.1f %4.1f f=%1d snr=%2d residual=%7.3f sig=%5.3f\n", obs[i].sat, azel[i * 2] * R2D, azel[1 + i * 2] * R2D,
+				freq_idx + 1, obs[i].SNR[freq_idx], v[nv - 1], sqrt(var[nv - 1]));
         }
     }
     return nv;
