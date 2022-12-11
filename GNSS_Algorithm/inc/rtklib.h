@@ -1140,6 +1140,7 @@ typedef struct {        /* satellite status type */
     uint8_t slip[NFREQ]; /* cycle-slip flag */
     uint8_t half[NFREQ]; /* half-cycle valid flag */
     int lock [NFREQ];   /* lock counter of phase */
+	int lock_P[2][NFREQ];  /* 伪距信号连续捕获次数(0:rover,1:base) */
     uint32_t outc [NFREQ]; /* obs outage counter of phase */
     uint32_t slipc[NFREQ]; /* cycle-slip counter */
     uint32_t rejc [NFREQ]; /* reject counter */

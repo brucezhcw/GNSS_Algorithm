@@ -1,4 +1,4 @@
-﻿/*------------------------------------------------------------------------------
+/*------------------------------------------------------------------------------
 * pntpos.c : standard positioning
 *
 *          Copyright (C) 2007-2020 by T.TAKASU, All rights reserved.
@@ -718,7 +718,7 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 	const double *dts, const double *vare, const int *svh,
 	const nav_t *nav, const double *x, const prcopt_t *opt,
 	double *v, double *H, double *var, double *azel, int *vsat,
-	double *resp, int *ns)
+	double *resp, int *ns, ssat_t *ssat)
 {
 	gtime_t time;
 	double r, freq, dion = 0.0, dtrp = 0.0, vmeas, vion = 0.0, vtrp = 0.0, rr[3], pos[3], dtr = 0.0, e[3], P;
@@ -739,9 +739,7 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 		azel[i * 2] = azel[1 + i * 2] = resp[i] = 0.0;
 		time = obs[i].time;
 		sat = obs[i].sat;
-		if (!(sys = satsys(sat, NULL)))
-			continue;
-
+		if (!(sys = satsys(sat, NULL))) continue;
 		/* reject duplicated observation data */
 		if (i < n - 1 && i < MAXOBS - 1 && sat == obs[i + 1].sat)
 		{
@@ -750,34 +748,20 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 			continue;
 		}
 		/* excluded satellite? */
-		if (satexclude(sat, vare[i], svh[i], opt))
-			continue;
-
+		if (satexclude(sat, vare[i], svh[i], opt)) continue;
 		/* geometric distance */
-		if ((r = geodist(rs + i * 6, rr, e)) <= 0.0)
-			continue;
+		if ((r = geodist(rs + i * 6, rr, e)) <= 0.0) continue;
 
 		if (iter > 0)
 		{
 			/* test elevation mask */
-			if (satazel(pos, e, azel + i * 2) < opt->elmin)
-				continue;
-
+			if (satazel(pos, e, azel + i * 2) < opt->elmin) continue;
 			/* test SNR mask */
-			if (!snrmask(obs + i, azel + i * 2, opt))
-				continue;
-
+			if (!snrmask(obs + i, azel + i * 2, opt)) continue;
 			/* ionospheric correction */
-			if (!ionocorr(time, nav, sat, pos, azel + i * 2, opt->ionoopt, &dion, &vion))
-			{
-				continue;
-			}
-
+			if (!ionocorr(time, nav, sat, pos, azel + i * 2, opt->ionoopt, &dion, &vion)) continue;
 			/* tropospheric correction */
-			if (!tropcorr(time, nav, pos, azel + i * 2, opt->tropopt, &dtrp, &vtrp))
-			{
-				continue;
-			}
+			if (!tropcorr(time, nav, pos, azel + i * 2, opt->tropopt, &dtrp, &vtrp)) continue;
 		}
 
 		for (freq_idx = 0; freq_idx < nf; freq_idx++)
@@ -796,9 +780,9 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 			}
 
 			/* psendorange with code bias correction */
-			if ((P = prange_mulfreq(obs + i, nav, opt, freq_idx, &vmeas)) == 0.0)
-				continue;
+			if ((P = prange_mulfreq(obs + i, nav, opt, freq_idx, &vmeas)) == 0.0) continue;
 
+			//if (ssat[obs[i].sat-1].lock_P[0][freq_idx]<10) continue;
 			/* pseudorange residual */
 			v[nv] = P - (r + dtr - CLIGHT * dts[i * 2] + dion + dtrp);
 
@@ -963,10 +947,7 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
         {
             freq = sat2freq(obs[i].sat, obs[i].code[freq_idx], nav);
 
-            if (obs[i].D[freq_idx] == 0.0 || freq == 0.0)
-            {
-                continue;
-            }
+            if (obs[i].D[freq_idx] == 0.0 || freq == 0.0) continue;
 
 			if (i == ind_ref && freq_idx == freq_ref) continue;
 
@@ -1109,6 +1090,15 @@ static void init_spp(rtk_t*rtk){
 		for (j = 0; j < NX_F; j++)
 		{
 			rtk->P_spp[i * NX_F + j] = 0.0;
+		}
+	}
+
+	for (i = 0; i < MAXSAT; i++)
+	{
+		for (j = 0; j < rtk->opt.nf; j++)
+		{
+			rtk->ssat[i].lock_P[0][j] = 0;
+			rtk->ssat[i].lock_P[1][j] = 0;
 		}
 	}
 }
@@ -1260,6 +1250,34 @@ static void insert_vel_acc_colums(const int nv, double *H)
 	}
 	free(H_copy);
 }
+static int udobs_rover(const obsd_t *obs, int n, rtk_t *rtk)
+{
+	int i,sat,freq;
+	unsigned char track_index[MAXSAT];
+
+	for (freq = 0; freq < rtk->opt.nf; freq++)
+	{
+		for (i = 0; i < MAXSAT; i++)
+		{
+			track_index[i] = 0;
+		}
+		for (i = 0; i < n && i < MAXOBS; i++)
+		{
+			sat = obs[i].sat;
+			if (sat>0 && sat <= MAXSAT && obs[i].P[freq]!=0.0 && obs[i].SNR[freq]>0) track_index[sat - 1] = 1;
+		}
+
+		for (i = 0; i < MAXSAT; i++)
+		{
+			if (track_index[i] == 1)
+			{
+				rtk->ssat[i].lock_P[0][freq]++;
+				trace(3, "udobs_rover: sat=%3d f=%d lock=%5d\n", i + 1, freq + 1, rtk->ssat[i].lock_P[0][freq]);
+			}
+			else rtk->ssat[i].lock_P[0][freq] = 0;
+		}
+	}
+}
 /* estimate receiver position ------------------------------------------------*/
 static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *dts,
 	const double *vare, const int *svh, const nav_t *nav, double *azel, int *vsat,
@@ -1300,6 +1318,7 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	}
 	else
 	{
+		udobs_rover(obs, n, rtk);
 		udpos_spp(rtk, dt);
 		rtk->P_spp[9 + 9 * NX_F] += SQR(3.0);
 		/* add the receiver clk process noise */
@@ -1324,7 +1343,7 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	for (i = 0; i < 1; i++)
 	{
 		/* pseudorange residuals (m) */
-		nv = rescode_mulfreq_ekf(1, obs, n, rs, dts, vare, svh, nav, x, &rtk->opt, v, H, var, azel, vsat, resp, &ns);
+		nv = rescode_mulfreq_ekf(1, obs, n, rs, dts, vare, svh, nav, x, &rtk->opt, v, H, var, azel, vsat, resp, &ns, rtk->ssat);
 
 		if (ns < NX)
 		{
