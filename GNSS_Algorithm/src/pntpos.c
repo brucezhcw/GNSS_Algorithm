@@ -54,10 +54,10 @@
 /* pseudorange measurement error variance ------------------------------------*/
 static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys, int freq)
 {
-    double fact=1.0,varr,snr_rover,snrweight;
+    double fact=1.5,varr,snr_rover,snrweight;
 
 	if (freq == 1) fact *= 0.9;
-	else if (freq == 2) fact *= 0.6;
+	else if (freq == 2) fact *= 0.85;
 
     switch (sys) {
         case SYS_GPS: fact *= EFACT_GPS; break;
@@ -71,10 +71,10 @@ static double varerr(const prcopt_t *opt, const obsd_t *obs, double el, int sys,
     if (el<MIN_EL) el=MIN_EL;
     /* var = R^2*(a^2 + (b^2/sin(el) + c^2*(10^(0.1*(snr_max-snr_rover)))) + (d*rcv_std)^2) */
     varr=SQR(opt->err[1])+SQR(opt->err[2])/SQR(sin(el))/(sin(el));
-	snr_rover = SNR_UNIT*obs->SNR[freq];
+	//snr_rover = SNR_UNIT*obs->SNR[freq];
 	//pow(10, (snr_rover - 50) / 30)*(1 - (30/(pow(10,(50-10)/30)-1))*(snr_rover - 50) / (50-10));
-	snrweight = pow(10, (snr_rover - 50) / 30)*(1 - 1.460255716*(snr_rover - 50) / 40);
-	varr /= (snr_rover >= 50 ? 1 : snrweight);
+	//snrweight = pow(10, (snr_rover - 50) / 30)*(1 - 1.460255716*(snr_rover - 50) / 40);
+	//varr /= (snr_rover >= 50 ? 1 : snrweight);
 	//varr=0.64 + 784 * pow(2.71828,-0.142 * obs->SNR[freq]);
     varr*=SQR(opt->eratio[0]);
     if (opt->err[7]>0.0) {
@@ -827,10 +827,10 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 
 			/* variance of pseudorange error */
 			var[nv] = varerr(opt, &obs[i], azel[1 + i * 2], sys, freq_idx);
-			if (v[nv]<-15 || v[nv]>15) var[nv] *= SQR(30);
+			if (v[nv]<-20 || v[nv]>20) var[nv] *= SQR(30);
 			else if (fabs(v[nv])>10)
 			{
-				var[nv] *= SQR(fabs(v[nv]) / 10);
+				var[nv] *= SQR(fabs(v[nv] / 10));
 			}
 			nv++;
 
@@ -1152,10 +1152,7 @@ static void udpos_spp(rtk_t *rtk, double tt)
 	ix = imat(NX_F, 1);
 	for (i = nx = 0; i < NX_F; i++)
 	{
-		// if (rtk->x_spp[i] != 0.0 && rtk->P_spp[i + i * NX_F] > 0.0)
-		//     ix[nx++] = i;
-		if (i < 9)
-			ix[nx++] = i;
+		if (i < 9) ix[nx++] = i;
 	}
 	if (nx < 9)
 	{
@@ -1173,7 +1170,7 @@ static void udpos_spp(rtk_t *rtk, double tt)
 	{
 		F[i + (i + 3) * nx] = tt;
 	}
-	if (var < 5.0)
+	if (var < 0.9)
 	{ /* include accel terms if EKF filter is converged */
 		for (i = 0; i < 3; i++)
 		{
@@ -1208,8 +1205,8 @@ static void udpos_spp(rtk_t *rtk, double tt)
 		}
 	}
 	/* process noise added to only acceleration */
-	Q[0] = Q[4] = SQR(3.0) * fabs(tt);
-	Q[8] = SQR(2.0) * fabs(tt);
+	Q[0] = Q[4] = SQR(1.5) * SQR(tt);
+	Q[8] = SQR(2.0) * SQR(tt);
 	ecef2pos(rtk->x_spp, pos);
 	covecef(pos, Q, Qv);
 	for (i = 0; i < 3; i++)
@@ -1290,6 +1287,7 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	char msg[128] = "";
 	sol_t *sol = &rtk->sol;
 	int trace_level_filter = 3;
+	static int inittimes = 0;
 
 	trace(3, "estpos_ekf: n=%d\n", n);
 
@@ -1300,19 +1298,22 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	{
 		stat = pntpos(obs, n, nav, &rtk->opt, sol, azel, rtk->ssat, msg);
 
-		if (stat == SOLQ_NONE || sol->ns < 10) return stat;
+		if (stat == SOLQ_NONE || sol->ns < 6) return stat;
 
-		init_spp(rtk);
-		for (i = 0; i < 3; i++)
-			initx(rtk, sol->rr[i], VAR_POS, i);
-		for (i = 3; i < 6; i++)
-			initx(rtk, 0.1, VAR_VEL, i);
-		for (i = 6; i < 9; i++)
-			initx(rtk, 1E-2, VAR_ACC, i);
-
-		for (i = 9; i < NX_F; i++)
+		if (inittimes++ > 30)
 		{
-			initx(rtk, 0.1, SQR(15), i);
+			init_spp(rtk);
+			for (i = 0; i < 3; i++)
+				initx(rtk, sol->rr[i], VAR_POS, i);
+			for (i = 3; i < 6; i++)
+				initx(rtk, 0.1, VAR_VEL, i);
+			for (i = 6; i < 9; i++)
+				initx(rtk, 1E-2, VAR_ACC, i);
+
+			for (i = 9; i < NX_F; i++)
+			{
+				initx(rtk, 0.1, SQR(30), i);
+			}
 		}
 		return stat;
 	}
@@ -1320,7 +1321,7 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	{
 		udobs_rover(obs, n, rtk);
 		udpos_spp(rtk, dt);
-		rtk->P_spp[9 + 9 * NX_F] += SQR(3.0);
+		rtk->P_spp[9 + 9 * NX_F] += SQR(0.3);
 		/* add the receiver clk process noise */
 		for (i = 10; i < NX_F; i++){
 			rtk->P_spp[i + i * NX_F] += SQR(0.1);
