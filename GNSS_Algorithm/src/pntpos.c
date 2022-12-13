@@ -573,7 +573,7 @@ static int rescode_mulfreq(int iter, const obsd_t *obs, int n, const double *rs,
 	double *resp, int *ns)
 {
 	gtime_t time;
-	double r, freq, dion = 0.0, dtrp = 0.0, vmeas, vion = 0.0, vtrp = 0.0, rr[3], pos[3], dtr, e[3], P;
+	double r, freq, dion_ref = 0.0, dion = 0.0, dtrp = 0.0, vmeas, vion = 0.0, vtrp = 0.0, rr[3], pos[3], dtr, e[3], P;
 	int i, j, nv = 0, sat, sys, mask[NX - 3] = { 0 };
 	int freq_idx, nf;
 
@@ -591,9 +591,7 @@ static int rescode_mulfreq(int iter, const obsd_t *obs, int n, const double *rs,
 		azel[i * 2] = azel[1 + i * 2] = resp[i] = 0.0;
 		time = obs[i].time;
 		sat = obs[i].sat;
-		if (!(sys = satsys(sat, NULL)))
-			continue;
-
+		if (!(sys = satsys(sat, NULL))) continue;
 		/* reject duplicated observation data */
 		if (i < n - 1 && i < MAXOBS - 1 && sat == obs[i + 1].sat)
 		{
@@ -602,38 +600,25 @@ static int rescode_mulfreq(int iter, const obsd_t *obs, int n, const double *rs,
 			continue;
 		}
 		/* excluded satellite? */
-		if (satexclude(sat, vare[i], svh[i], opt))
-			continue;
-
+		if (satexclude(sat, vare[i], svh[i], opt)) continue;
 		/* geometric distance */
-		if ((r = geodist(rs + i * 6, rr, e)) <= 0.0)
-			continue;
+		if ((r = geodist(rs + i * 6, rr, e)) <= 0.0) continue;
 
 		if (iter > 0)
 		{
 			/* test elevation mask */
-			if (satazel(pos, e, azel + i * 2) < opt->elmin)
-				continue;
-
+			if (satazel(pos, e, azel + i * 2) < opt->elmin) continue;
 			/* test SNR mask */
-			if (!snrmask(obs + i, azel + i * 2, opt))
-				continue;
-
+			if (!snrmask(obs + i, azel + i * 2, opt)) continue;
 			/* ionospheric correction */
-			if (!ionocorr(time, nav, sat, pos, azel + i * 2, opt->ionoopt, &dion, &vion))
-			{
-				continue;
-			}
-
+			if (!ionocorr(time, nav, sat, pos, azel + i * 2, opt->ionoopt, &dion_ref, &vion)) continue;
 			/* tropospheric correction */
-			if (!tropcorr(time, nav, pos, azel + i * 2, opt->tropopt, &dtrp, &vtrp))
-			{
-				continue;
-			}
+			if (!tropcorr(time, nav, pos, azel + i * 2, opt->tropopt, &dtrp, &vtrp)) continue;
 		}
 
 		for (freq_idx = 0; freq_idx < nf; freq_idx++)
 		{
+			dion = dion_ref;
 			if (iter > 0)
 			{
 				if ((freq = sat2freq(sat, obs[i].code[freq_idx], nav)) == 0.0)
@@ -648,12 +633,9 @@ static int rescode_mulfreq(int iter, const obsd_t *obs, int n, const double *rs,
 			}
 
 			/* psendorange with code bias correction */
-			if ((P = prange_mulfreq(obs + i, nav, opt, freq_idx, &vmeas)) == 0.0)
-				continue;
-
+			if ((P = prange_mulfreq(obs + i, nav, opt, freq_idx, &vmeas)) == 0.0) continue;
 			/* pseudorange residual */
 			v[nv] = P - (r + dtr - CLIGHT * dts[i * 2] + dion + dtrp);
-
 			/* design matrix */
 			for (j = 0; j < NX; j++)
 			{
@@ -721,7 +703,7 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 	double *resp, int *ns, ssat_t *ssat)
 {
 	gtime_t time;
-	double r, freq, dion = 0.0, dtrp = 0.0, vmeas, vion = 0.0, vtrp = 0.0, rr[3], pos[3], dtr = 0.0, e[3], P;
+	double r, freq, dion_ref = 0.0, dion = 0.0, dtrp = 0.0, vmeas, vion = 0.0, vtrp = 0.0, rr[3], pos[3], dtr = 0.0, e[3], P;
 	int i, j, nv = 0, sat, sys, mask[NX - 3] = { 0 };
 	int freq_idx, nf;
 
@@ -759,13 +741,14 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 			/* test SNR mask */
 			if (!snrmask(obs + i, azel + i * 2, opt)) continue;
 			/* ionospheric correction */
-			if (!ionocorr(time, nav, sat, pos, azel + i * 2, opt->ionoopt, &dion, &vion)) continue;
+			if (!ionocorr(time, nav, sat, pos, azel + i * 2, opt->ionoopt, &dion_ref, &vion)) continue;
 			/* tropospheric correction */
 			if (!tropcorr(time, nav, pos, azel + i * 2, opt->tropopt, &dtrp, &vtrp)) continue;
 		}
 
 		for (freq_idx = 0; freq_idx < nf; freq_idx++)
 		{
+			dion = dion_ref;
 			if (iter > 0)
 			{
 				if ((freq = sat2freq(sat, obs[i].code[freq_idx], nav)) == 0.0)
@@ -866,22 +849,16 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
 	for (i = 0; i < n && i < MAXOBS; i++)
     {
 
-        if (!(sys = satsys(obs[i].sat, NULL)) || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0)
-        {
-            continue;
-        }
+        if (!(sys = satsys(obs[i].sat, NULL)) || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0) continue;
 
         for (freq_idx = 0; freq_idx < opt->nf; freq_idx++)
         {
             freq = sat2freq(obs[i].sat, obs[i].code[freq_idx], nav);
 
-            if (obs[i].D[freq_idx] == 0.0 || freq == 0.0)
-            {
-                continue;
-            }
+            if (obs[i].D[freq_idx] == 0.0 || freq == 0.0) continue;
 
 			if (ind_ref == -1 || (obs[i].SNR[freq_idx]>=SNR_ref && azel[1 + i * 2] * R2D>ele_ref) ||
-								 (obs[i].SNR[freq_idx]>SNR_ref && azel[1 + i * 2] * R2D>ele_ref-10))
+								 (obs[i].SNR[freq_idx]>SNR_ref && azel[1 + i * 2] * R2D>ele_ref-5))
             {
 				ele_ref = azel[1 + i * 2] * R2D;
 				SNR_ref = obs[i].SNR[freq_idx];
@@ -922,18 +899,13 @@ static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *r
     for (i = 0; i < n && i < MAXOBS; i++)
     {
 
-        if (!(sys = satsys(obs[i].sat, NULL)) || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0)
-        {
-            continue;
-        }
-
+        if (!(sys = satsys(obs[i].sat, NULL)) || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0) continue;
         /* LOS (line-of-sight) vector in ECEF */
         cosel = cos(azel[1 + i * 2]);
         a[0] = sin(azel[i * 2]) * cosel;
         a[1] = cos(azel[i * 2]) * cosel;
         a[2] = sin(azel[1 + i * 2]);
         matmul("TN", 3, 1, 3, 1.0, E, a, 0.0, e);
-
         /* satellite velocity relative to receiver in ECEF */
         for (j = 0; j < 3; j++)
         {
