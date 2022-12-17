@@ -347,7 +347,7 @@ static void outsolstat(rtk_t *rtk,const nav_t *nav)
         if (!ssat->vs) continue;
         satno2id(i+1,id);
         for (j=0;j<nfreq;j++) {
-            k=IB(i+1,j,&rtk->opt);
+			k = (rtk->opt.mode > PMODE_DGPS) ? IB(i + 1, j, &rtk->opt) : 0;
             fprintf(fp_stat,"$SAT,%d,%.3f,%s,%d,%.1f,%.1f,%.4f,%.4f,%d,%.0f,%d,%d,%d,%d,%d,%d,%.2f,%.6f,%.5f\n",
                     week,tow,id,j+1,ssat->azel[0]*R2D,ssat->azel[1]*R2D,
                     ssat->resp[j],ssat->resc[j],ssat->vsat[j],ssat->snr_rover[j]*SNR_UNIT,

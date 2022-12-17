@@ -1,4 +1,4 @@
-﻿/*------------------------------------------------------------------------------
+/*------------------------------------------------------------------------------
 * pntpos.c : standard positioning
 *
 *          Copyright (C) 2007-2020 by T.TAKASU, All rights reserved.
@@ -1210,7 +1210,7 @@ static int udobs_rover(const obsd_t *obs, int n, rtk_t *rtk)
 			if (track_index[i] == 1)
 			{
 				rtk->ssat[i].lock_P[0][freq]++;
-				trace(3, "udobs_rover: sat=%3d f=%d lock=%5d\n", i + 1, freq + 1, rtk->ssat[i].lock_P[0][freq]);
+				trace(4, "udobs_rover: sat=%3d f=%d lock=%5d\n", i + 1, freq + 1, rtk->ssat[i].lock_P[0][freq]);
 			}
 			else rtk->ssat[i].lock_P[0][freq] = 0;
 		}
