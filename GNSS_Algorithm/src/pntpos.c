@@ -1,4 +1,4 @@
-/*------------------------------------------------------------------------------
+﻿/*------------------------------------------------------------------------------
 * pntpos.c : standard positioning
 *
 *          Copyright (C) 2007-2020 by T.TAKASU, All rights reserved.
@@ -704,7 +704,7 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 {
 	gtime_t time;
 	double r, freq, dion_ref = 0.0, dion = 0.0, dtrp = 0.0, vmeas, vion = 0.0, vtrp = 0.0, rr[3], pos[3], dtr = 0.0, e[3], P;
-	int i, j, nv = 0, sat, sys, mask[NX - 3] = { 0 };
+	int i, j, nv = 0, sat, sys, mask[NX_F - 9] = { 0 };
 	int freq_idx, nf;
 
 	trace(3, "rescode_mulfreq_ekf : n=%d\n", n);
@@ -770,38 +770,35 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 			v[nv] = P - (r + dtr - CLIGHT * dts[i * 2] + dion + dtrp);
 
 			/* design matrix */
-			for (j = 0; j < NX; j++)
+			for (j = 0; j < NX_F; j++)
 			{
-				H[j + nv * NX] = j < 3 ? -e[j] : (j == 3 ? 1.0 : 0.0);
+				H[j + nv * NX_F] = j < 3 ? -e[j] : (j == 9 ? 1.0 : 0.0);
 			}
 			/* time system offset and receiver bias correction */
 			if (sys == SYS_GLO)
 			{
 				v[nv] -= x[10];
-				H[4 + nv * NX] = 1.0;
+				H[10 + nv * NX_F] = 1.0;
 				mask[1] = 1;
 			}
 			else if (sys == SYS_GAL)
 			{
 				v[nv] -= x[11];
-				H[5 + nv * NX] = 1.0;
+				H[11 + nv * NX_F] = 1.0;
 				mask[2] = 1;
 			}
 			else if (sys == SYS_CMP)
 			{
 				v[nv] -= x[12];
-				H[6 + nv * NX] = 1.0;
+				H[12 + nv * NX_F] = 1.0;
 				mask[3] = 1;
 			}
 			else if (sys == SYS_IRN)
 			{
 				v[nv] -= x[13];
-				H[7 + nv * NX] = 1.0;
+				H[13 + nv * NX_F] = 1.0;
 				mask[4] = 1;
 			}
-#if 0 /* enable QZS-GPS time offset estimation */
-			else if (sys == SYS_QZS) { v[nv] -= x[8]; H[8 + nv*NX] = 1.0; mask[5] = 1; }
-#endif
 			else
 				mask[0] = 1;
 
@@ -823,25 +820,23 @@ static int rescode_mulfreq_ekf(int iter, const obsd_t *obs, int n, const double 
 		(*ns)++;
 	}
 	/* constraint to avoid rank-deficient */
-	for (i = 0; i < NX - 3; i++)
+	for (i = 0; i < NX_F - 9; i++)
 	{
-		if (mask[i])
-			continue;
+		if (mask[i]) continue;
 		v[nv] = 0.0;
-		for (j = 0; j < NX; j++)
-			H[j + nv * NX] = j == i + 3 ? 1.0 : 0.0;
+		for (j = 0; j < NX_F; j++) H[j + nv * NX_F] = j == i + 9 ? 1.0 : 0.0;
 		var[nv++] = SQR(0.01);
 	}
 	return nv;
 }
-static int resdop_mulfreq_filter(const obsd_t *obs, const int n, const double *rs, const double *dts,
+static int resdop_mulfreq_ekf(const obsd_t *obs, const int n, const double *rs, const double *dts,
                                  const nav_t *nav, const double *rr, const prcopt_t *opt, const double *x,
                                  const double *azel, const int *vsat, double *v, double *var, double *H)
 {
     double freq, rate, pos[3], E[9], a[3], e[3], vs[3], cosel, sig, e_ref[3] = {0.0}, v_ref = 0.0, ele_ref=0.0;
     int i, j, nv = 0, sys, freq_idx, SNR_ref=0, ind_ref=-1, freq_ref=-1;;
 
-    trace(3, "resdop_mulfreq_filter  : n=%d\n", n);
+    trace(3, "resdop_mulfreq_ekf  : n=%d\n", n);
 
     ecef2pos(rr, pos);
     xyz2enu(pos, E);
@@ -1193,32 +1188,6 @@ static void udpos_spp(rtk_t *rtk, double tt)
 	free(x);
 	free(xp);
 }
-static void insert_vel_acc_colums(const int nv, double *H)
-{
-	int i, j;
-	double *H_copy;
-	H_copy = mat(nv, NX);
-	matcpy(H_copy, H, nv, NX);
-	for (i = 0; i < nv; i++)
-	{
-		/* reset the H*/
-		for (j = 0; j < NX_F; j++)
-		{
-			H[i * NX_F + j] = 0.0;
-		}
-		/*for P state*/
-		for (j = 0; j < 3; j++)
-		{
-			H[i * NX_F + j] = H_copy[i * NX + j];
-		}
-		/*for receiver clock state*/
-		for (j = 3; j < NX; j++)
-		{
-			H[i * NX_F + 6 + j] = H_copy[i * NX + j];
-		}
-	}
-	free(H_copy);
-}
 static int udobs_rover(const obsd_t *obs, int n, rtk_t *rtk)
 {
 	int i,sat,freq;
@@ -1258,7 +1227,6 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 	double dt = 0.0;
 	char msg[128] = "";
 	sol_t *sol = &rtk->sol;
-	int trace_level_filter = 3;
 	static int inittimes = 0;
 
 	trace(3, "estpos_ekf: n=%d\n", n);
@@ -1318,14 +1286,12 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 		/* pseudorange residuals (m) */
 		nv = rescode_mulfreq_ekf(1, obs, n, rs, dts, vare, svh, nav, x, &rtk->opt, v, H, var, azel, vsat, resp, &ns, rtk->ssat);
 
-		if (ns < NX)
+		if (ns < NX_F-6)
 		{
 			return -1;
 		}
 
-		insert_vel_acc_colums(nv, H);
-
-		nv += resdop_mulfreq_filter(obs, n, rs, dts, nav, x, &rtk->opt, x + 3, azel, vsat, v + nv, var + nv, H + nv * NX_F);
+		nv += resdop_mulfreq_ekf(obs, n, rs, dts, nav, x, &rtk->opt, x + 3, azel, vsat, v + nv, var + nv, H + nv * NX_F);
 
 		/* weighted by Std */
 		for (j = 0; j < nv; j++)
@@ -1334,25 +1300,25 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 		}
 
 		/*debug trace*/
-		trace(trace_level_filter, "before_x=\n");
-		tracemat(trace_level_filter, x, 1, col_num, 7, 3);
-		trace(trace_level_filter, "before_P=\n");
-		tracemat(trace_level_filter, P, col_num, col_num, 7, 3);
-		trace(trace_level_filter, "before_H=\n");
-		tracemat(trace_level_filter, H, col_num, nv, 7, 3);
-		trace(trace_level_filter, "before_v=\n");
-		tracemat(trace_level_filter, v, 1, nv, 7, 3);
-		trace(trace_level_filter, "before_R=\n");
-		tracemat(trace_level_filter, R, nv, nv, 7, 3);
+		trace(3, "before_x=\n");
+		tracemat(3, x, 1, col_num, 7, 3);
+		trace(4, "before_P=\n");
+		tracemat(4, P, col_num, col_num, 7, 3);
+		trace(4, "H=\n");
+		tracemat(4, H, col_num, nv, 7, 3);
+		trace(4, "v=\n");
+		tracemat(4, v, 1, nv, 7, 3);
+		trace(4, "R=\n");
+		tracemat(4, R, nv, nv, 7, 3);
 		/* kalman estimation */
 		if ((info = filter(x, P, H, v, R, NX_F, nv)))
 		{
 			return -2;
 		}
-		trace(trace_level_filter, "after_x=\n");
-		tracemat(trace_level_filter, x, 1, col_num, 7, 3);
-		trace(trace_level_filter, "after_P=\n");
-		tracemat(trace_level_filter, P, col_num, col_num, 7, 3);
+		trace(3, "after_x=\n");
+		tracemat(3, x, 1, col_num, 7, 3);
+		trace(3, "after_P=\n");
+		tracemat(3, P, col_num, col_num, 7, 3);
 		stat = SOLQ_SINGLE;
 	}
 
