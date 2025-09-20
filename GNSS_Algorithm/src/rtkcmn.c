@@ -210,7 +210,7 @@ const prcopt_t prcopt_default={ /* defaults processing options */
     1,0,0,0,0,                  /* niter,codesmooth,intpref,sbascorr,sbassatsel */
     0,0,                        /* rovpos,refpos */
     {300.0,100.0,100.0},        /* eratio[] */
-    {100.0,0.001,0.01,0.0,1.0,52.0,0.0,0.0}, /* err[-,base,el,bl,dop,snr_max,snr,rcverr] */
+    {100.0,0.001,0.01,0.0,1.0,52.0,0.002,0.0}, /* err[-,base,el,bl,dop,snr_max,snr,rcverr] */
     {30.0,0.03,0.3},            /* std[] */
     {1E-4,1E-3,1E-4,3.0,1.0,0.0}, /* prn[] */
     5E-12,                      /* sclkstab */
@@ -672,12 +672,12 @@ static int code2freq_BDS(uint8_t code, double *freq)
     char *obs=code2obs(code);
     
     switch (obs[0]) {
-        case '1': *freq=FREQL1;     return 0; /* B1C */
-        case '2': *freq=FREQ1_CMP; return 0; /* B1I */
-        case '7': *freq=FREQ2_CMP; return 1; /* B2I/B2b */
+        case '1': *freq=FREQL1;     return 1; /* B1C */
+        case '2': *freq=FREQ1_CMP;  return 0; /* B1I */
+        case '7': *freq=FREQ2_CMP;  return 1; /* B2I/B2b */
         case '5': *freq=FREQL5;     return 2; /* B2a */
-        case '6': *freq=FREQ3_CMP; return 3; /* B3 */
-        case '8': *freq=FREQE5ab;     return 4; /* B2ab */
+        case '6': *freq=FREQ3_CMP;  return 3; /* B3 */
+        case '8': *freq=FREQE5ab;   return 4; /* B2ab */
     }
     return -1;
 }
@@ -1268,6 +1268,182 @@ extern int lsq(const double *A, const double *y, int n, int m, double *x,
     matmul("NT",n,n,m,1.0,A,A,0.0,Q);  /* Q=A*A' */
     if (!(info=matinv(Q,n))) matmul("NN",n,1,n,1.0,Q,Ay,0.0,x); /* x=Q^-1*Ay */
     free(Ay);
+    return info;
+}
+/* 基于特定核函数的残差权重的鲁棒重估计 --------------------------------------------
+* args   : double   residual        I   先验残差
+*          double   sig             I   先验标准差
+*          int      kernel          I   指定的核函数类型 (1:Huber Loss, 2:IGG3 Loss)
+*          int      mode            I   残差类型 (1:Position, 2:Velocity)
+* return : weight (应用了指定核函数之后的后验权重)
+*-----------------------------------------------------------------------------*/
+static double weight_lsq(double residual, double sig, int kernel, int mode)
+{
+    residual = fabs(residual);
+    if (sig == 0.0) sig = 1.0;
+
+    switch (kernel) {
+        case 1: { /* Huber model */
+            double k = 1.345;
+            if (mode == 2) k = 5.0;
+
+            double z = residual / sig;
+
+            if ((mode == 1 && residual >= 100) || (mode == 2 && residual >= 20)) return 0.1 / residual; //> 异常观测，小权重
+
+            if (z < k)  return 1.0 / sig;
+            else        return k / residual;
+        }
+        case 2: { /* IGG3 model */
+            double k1 = 1.5;
+            double k2 = 50.0;
+            if (mode == 2) {
+                k1 = 5.0;
+                k2 = 50.0;
+            }
+
+            double z = residual / sig;
+
+            if ((mode == 1 && residual >= 100) || (mode == 2 && residual >= 20)) return 0.1 / residual;
+
+            if      (z < k1)    return 1.0 / sig;
+            else if (z < k2)    return k1 / z * (k2 - z) / (k2 - k1) / sig;
+            else                return 0.0001 / residual;
+        }
+        default: {
+            return 1.0;
+        }
+    }
+}
+static double weight_ekf(double residual, double sig, int kernel, int mode)
+{
+    residual = fabs(residual);
+    if (sig == 0.0) sig = 1.0;
+
+    switch (kernel) {
+        case 1: { /* Huber */
+            double k = 1.345;
+
+            double z = residual / sig;
+
+            if      (z < k)                                             return 1.0 / sig;
+            else if ((mode==1&&residual>=30) || (mode==2&&residual>=2)) return 0.0001 / residual;
+            else                                                        return k / residual;
+        }
+        default: {
+            return 1.0;
+        }
+    }
+}
+/* Robust least square estimation --------------------------------------------
+* args   : double *H        I   transpose of design matrix (nx x nv)
+*          double *v        I   easurements (nv x 1)
+*          int    nx,nv     I   number of parameters and measurements (nx<=nv)
+*          double *dx       O   estmated parameters (nx x 1)
+*          double *Q        O   esimated parameters covariance matrix (nx x nx)
+*          double *var      I   先验方差 (nv)
+*          int    mode      I   残差类型 (1:Position, 2:Velocity)
+* return : status (0:ok,0>:error)
+*-----------------------------------------------------------------------------*/
+extern int lsq_robust(const double *H, const double *v, int nx, int nv, double *dx, double *Q, const double *var, int mode)
+{
+    double *v_new = mat(1, nv), *H_new = mat(nx, nv);
+    double *dx_prev = mat(nx, 1), *ddx = mat(nx, 1);
+    double sig, weight, residual, diff;
+    int info = 0, iter, i, j;
+    const int max_iter = 15;
+
+    memset(dx, 0, nx * sizeof(double));
+    matcpy(dx_prev, dx, nx, 1);
+
+    for (iter = 0; iter < max_iter; iter++) {
+        for (i = 0; i < nv; i++) {
+            sig = sqrt(var[i]);
+            weight = 1.0 / sig;
+            residual = fabs(v[i] - dot(H + i * nx, dx, nx));
+            if (mode == 2) {
+                weight = weight_lsq(residual, sig, 1, 2);
+            } else {
+                weight = weight_lsq(residual, sig, 1, 1);
+            }
+            v_new[i] = v[i] * weight;
+            for (j = 0; j < nx; j++) {
+                H_new[j + i * nx] = H[j + i * nx] * weight;
+            }
+        }
+
+        if (info = lsq(H_new, v_new, nx, nv, dx, Q)) {
+            trace(3, "lsq_robust: lsq failed, info=%d \n", info);
+            break;
+        }
+
+        for (i = 0; i < nx; i++) ddx[i] = dx[i] - dx_prev[i];
+        matcpy(dx_prev, dx, nx, 1);
+        diff = norm(ddx, 4);
+
+        if (mode==1 && diff < P_RES_MAX_ACCEPT) break;
+        if (mode==2 && diff < V_RES_MAX_ACCEPT) break;
+    }
+
+    free(v_new); free(H_new); free(dx_prev); free(ddx);
+    return info;
+}
+/* Robust EKF Code and doppler measurements weight estimation ----------------
+* args   : double *H        I   transpose of design matrix (nx x nv)
+*          double *v        I   easurements (nv x 1)
+*          int    nx        I   number of parameters (nx)
+*          int    nc,nd     I   number of Code measurements and Doppler measurements (nv=nc+nd)
+*          double *Q        O   esimated parameters covariance matrix (nx x nx)
+*          double *var      I   先验方差 (nv)
+* return : status (0:ok,0>:error)
+*-----------------------------------------------------------------------------*/
+extern int weight_ekf_robust(const double *H, const double *v, int nx, int nc, int nd, double *Q, double *var)
+{
+    int nv = nc + nd;
+    double *W = mat(1, nv), *v_new = mat(1, nv), *H_new = mat(nx, nv);
+    double *dx_prev = mat(nx, 1), *ddx = mat(nx, 1), *dx = mat(nx, 1);
+    double sig, weight, residual, diff;
+    int info = 0, iter, i, j;
+    const int max_iter = 15;
+    if (Q == NULL) Q = mat(nx, nx);
+
+    memset(dx, 0, nx * sizeof(double));
+    memset(W,  1, nv * sizeof(double));
+    matcpy(dx_prev, dx, nx, 1);
+
+    for (iter = 0; iter < max_iter; iter++) {
+        for (i = 0; i < nv; i++) {
+            sig = sqrt(var[i]);
+            weight = 1.0 / sig;
+            residual = fabs(v[i] - dot(H + i * nx, dx, nx));
+            if (i >= nc) {
+                weight = weight_ekf(residual, sig, 1, 2);
+            } else {
+                weight = weight_ekf(residual, sig, 1, 1);
+            }
+
+            W[i] = weight;
+            v_new[i] = v[i] * weight;
+            for (j = 0; j < nx; j++) {
+                H_new[j + i * nx] = H[j + i * nx] * weight;
+            }
+        }
+        
+        if (info = lsq(H_new, v_new, nx, nv, dx, Q)) {
+            trace(3, "weight_ekf_robust: lsq failed, info=%d \n", info);
+            break;
+        }
+
+        for (i = 0; i < nx; i++) ddx[i] = dx[i] - dx_prev[i];
+        matcpy(dx_prev, dx, nx, 1);
+        diff = norm(ddx, nx);
+
+        if (diff < 1e-2) break;
+    }
+
+    for (i = 0; i < nv; i++) var[i] = 1 / SQR(W[i]);
+
+    free(W); free(v_new); free(H_new); free(dx_prev); free(ddx); free(dx);
     return info;
 }
 /* kalman filter ---------------------------------------------------------------
