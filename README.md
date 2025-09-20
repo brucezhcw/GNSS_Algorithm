@@ -1,6 +1,6 @@
 # GNSS Algorithm based on RTKLIB
 
-![GNSS-Explorer.png](https://github.com/brucezhcw/GNSS-Explorer/blob/linux/image/GNSS-Explorer.png) 
+![GNSS-Explorer.png](https://github.com/brucezhcw/GNSS-Explorer/blob/linux_smartphone/image/GNSS-Explorer.png) 
 
 本项目代码以RTKLIB为基础，用EKF扩展卡尔曼滤波算法实现了低精度绝对观测伪距 + 高精度相对观测多普勒数据的融合。
 相对观测多普勒数据精度较高（多普勒速度误差典型值10cm/s），结合卡尔曼滤波算法，可以保证定位轨迹局部的连续性，
