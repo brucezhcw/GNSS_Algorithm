@@ -123,6 +123,10 @@ extern "C" {
 #define SYS_LEO     0x80                /* navigation system: LEO */
 #define SYS_ALL     0xFF                /* navigation system: all */
 
+#define BDS_MEO 	0
+#define BDS_IGSO 	1
+#define BDS_GEO 	2
+
 #define TSYS_GPS    0                   /* time system: GPS time */
 #define TSYS_UTC    1                   /* time system: UTC */
 #define TSYS_GLO    2                   /* time system: GLONASS time */
@@ -370,6 +374,9 @@ extern "C" {
 #define PMODE_PPP_KINEMA 7              /* positioning mode: PPP-kinemaric */
 #define PMODE_PPP_STATIC 8              /* positioning mode: PPP-static */
 #define PMODE_PPP_FIXED 9               /* positioning mode: PPP-fixed */
+
+#define P_RES_MAX_ACCEPT 0.5            /* 单点定位 lsq 迭代阈值 */
+#define V_RES_MAX_ACCEPT 0.05           /* 单点定速 lsq 迭代阈值 */
 
 #define SOLF_LLH    0                   /* solution format: lat/lon/height */
 #define SOLF_XYZ    1                   /* solution format: x/y/z-ecef */
@@ -1381,6 +1388,10 @@ EXPORT int  solve (const char *tr, const double *A, const double *Y, int n,
                    int m, double *X);
 EXPORT int  lsq   (const double *A, const double *y, int n, int m, double *x,
                    double *Q);
+EXPORT int  lsq_robust(const double *H, const double *v, int nx, int nv, double *dx,
+                       double *Q, const double *var, int mode);
+EXPORT int  weight_ekf_robust(const double *H, const double *v, int nx, int nc, int nd,
+                              double *Q, double *var);
 EXPORT int  filter(double *x, double *P, const double *H, const double *v,
                    const double *R, int n, int m);
 EXPORT int  smoother(const double *xf, const double *Qf, const double *xb,
