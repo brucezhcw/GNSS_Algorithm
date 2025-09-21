@@ -8,4 +8,8 @@
 
 目前代码维护两个分支对应两个平台：linux + Visual Studio
 
-参考资料：[GNSS算法进阶（二）- kalman滤波单点定位算法代码实现](https://zhuanlan.zhihu.com/p/577601009)
+参考资料：
+
+[GNSS算法进阶（二）- kalman滤波单点定位算法代码实现](https://zhuanlan.zhihu.com/p/577601009)
+
+[智能手机抗差SPP算法 - MobileGNSS-SPP](https://github.com/salmoshu/MobileGNSS-SPP)

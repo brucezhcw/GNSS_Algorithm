@@ -2245,8 +2245,9 @@ extern int rtkpos(rtk_t *rtk, const obsd_t *obs, int n, const nav_t *nav)
     prcopt_t *opt=&rtk->opt;
     sol_t solb={{0}};
     gtime_t time;
-    int i,nu,nr;
+    int i,nu,nr,ret;
     char msg[128]="";
+    uint32_t tick_start;
     
     trace(3,"rtkpos  : time=%s n=%d\n",time_str(obs[0].time,3),n);
     trace(4,"obs=\n"); traceobs(4,obs,n);
@@ -2263,9 +2264,33 @@ extern int rtkpos(rtk_t *rtk, const obsd_t *obs, int n, const nav_t *nav)
     
     time=rtk->sol.time; /* previous epoch */
     
-    /* rover position and time by single point positioning */
-	if ((opt->dynamics > 0 && !pntpos_ekf(obs, nu, nav, rtk))
-		|| (opt->dynamics == 0 && !pntpos(obs, nu, nav, &rtk->opt, &rtk->sol, NULL, rtk->ssat, msg))){
+/* 
+0: EKF SPP, 基于卡尔曼滤波的SPP算法，数据源：伪距+多普勒
+1: STD SPP, 基于最小二乘的SPP算法，数据源：伪距
+2: STD SPP doppler DR, 基于多普勒速度积分的SPP算法，数据源：多普勒(测试多普勒速度精度用) */
+#define SPP_TYPE    0
+    tick_start = tickget();
+    if (SPP_TYPE == 0) {
+        ret = pntpos_ekf(obs, nu, nav, rtk);    /* rover position and velocity by EKF single point positioning */
+    } else {
+        ret = pntpos(obs, nu, nav, &rtk->opt, &rtk->sol, NULL, rtk->ssat, msg); /* rover position and velocity by standard single point positioning */
+    }
+    trace(3,"SPP used time: %u(ms)\n", tickget() - tick_start);
+
+    if (ret && SPP_TYPE == 2) {
+        double time_diff_;
+        static sol_t sol_DR = {{0}};
+
+        time_diff_ = timediff(rtk->sol.time, sol_DR.time);
+        if (time_diff_ > 3.0) {
+            sol_DR = rtk->sol;
+        } else {
+            for (i=0;i<3;i++) rtk->sol.rr[i] = sol_DR.rr[i] + 0.5 * (sol_DR.rr[i + 3] + rtk->sol.rr[i + 3]) * time_diff_;
+            rtk->sol.stat = SOLQ_DOP_SINGLE;
+            sol_DR = rtk->sol;
+        }
+    }
+	if (!ret) {
         errmsg(rtk,"point pos error (%s)\n",msg);
 
         if (!rtk->opt.dynamics) {
