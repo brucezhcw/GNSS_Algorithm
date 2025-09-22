@@ -546,9 +546,8 @@ extern "C" {
 #endif
 
 /*-----------------------new add for define-----------------------------------*/
-#define SPP_MODE_L1  1    /*for single frequency*/
-#define SPP_MODE_LX  2   /*for mul-frequency*/
-#define SPP_MODE_LIF  3  /*for iono-free*/
+#define SPP_MODE_L1  1  /*for single frequency*/
+#define SPP_MODE_LX  2  /*for mul-frequency*/
 
 /* type definitions ----------------------------------------------------------*/
 

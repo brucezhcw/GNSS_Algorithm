@@ -16,7 +16,7 @@ cd build
 cmake ..
 make
 
-./gnss_algorithm
+./gnss_algorithm YOUR_PATH_TO_RINEX_DATA_DIRECTORY
 ```
 
 参考资料：
