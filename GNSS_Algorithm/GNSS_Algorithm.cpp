@@ -10,7 +10,6 @@
 #define PROGNAME    "GNSS_Algorithm"	/* program name */
 #define MAXFILE     16                  /* max number of input files */
 
-/* rnx2rtkp main -------------------------------------------------------------*/
 int main(int argc, char **argv)
 {
 	prcopt_t prcopt = prcopt_default;
@@ -21,7 +20,7 @@ int main(int argc, char **argv)
 	int i, j, n, ret;
 	char *infile[MAXFILE] = {"F:\\GNSS_RTK\\GNSS_Algorithm\\GNSS_Algorithm\\data\\rover.obs",
 							 "F:\\GNSS_RTK\\GNSS_Algorithm\\GNSS_Algorithm\\data\\rover.nav"};
-	char *outfile =			{"F:\\GNSS_RTK\\GNSS_Algorithm\\GNSS_Algorithm\\data\\output.txt"};
+	char *outfile =			{"F:\\GNSS_RTK\\GNSS_Algorithm\\GNSS_Algorithm\\data\\rover.pos"};
 
 	solopt.posf = SOLF_LLH;
 	solopt.timef = 1;
