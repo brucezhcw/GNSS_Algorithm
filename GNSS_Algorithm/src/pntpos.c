@@ -1205,7 +1205,7 @@ static int estpos_ekf(const obsd_t *obs, int n, const double *rs, const double *
 		// 	return -1;
 		// }
 
-		nd += resdop_mulfreq_ekf(obs, n, rs, dts, nav, x, &rtk->opt, x + 3, azel, vsat, v + nc, var + nc, H + nc * NX_F);
+		nd = resdop_mulfreq_ekf(obs, n, rs, dts, nav, x, &rtk->opt, x + 3, azel, vsat, v + nc, var + nc, H + nc * NX_F);
 
 		nv = nc + nd;
 
