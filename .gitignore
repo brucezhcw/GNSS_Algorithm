@@ -1,8 +1,10 @@
+.vs/
 GNSS_Algorithm/data/
 Debug
 ipch
 *.sdf
 *.opensdf
+*.user
 
 *.suo
 *.ipch
@@ -17,6 +19,7 @@ ipch
 *.log
 *.pch
 *.idb
+*.db
 
 *.tlog
 *.lastbuildstate
